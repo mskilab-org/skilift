@@ -17,7 +17,11 @@ Cohort <- R6Class("Cohort",
     #' @param x Either a data.table or path to pipeline output directory
     #' @param reference_name character string specifying genome reference
     #' @param col_mapping Optional list mapping cohort columns to possible input columns
-    initialize = function(x, reference_name = "hg19", col_mapping = NULL) {
+    initialize = function(x = NULL, reference_name = "hg19", col_mapping = NULL) {
+      if (is.null(x)) {
+        self$inputs = data.table()
+        return(self)
+      }
       self$reference_name <- reference_name
       
       default_col_mapping <- list(
@@ -69,8 +73,9 @@ Cohort <- R6Class("Cohort",
           }
         }
       }
-      
+
       self$cohort_cols_to_x_cols <- default_col_mapping
+      
       
       if (is.character(x) && length(x) == 1) {
         self$inputs <- private$construct_from_path(x)
@@ -450,7 +455,13 @@ parse_pipeline_paths = function(
   return(initial_dt)
 }
 
-
+#' deparse1 copy
+#'
+#' Robustly deparse object
+#'
+deparse1 = function(expr, collapse = " ", width.cutoff = 500L, ...) {
+    paste(deparse(expr, width.cutoff, ...), collapse = collapse)
+}
 
 #' Subset Cohort object
 #'
@@ -458,19 +469,25 @@ parse_pipeline_paths = function(
 #'
 #' @export 
 '[.Cohort' = function(obj, i = NULL, j = NULL, with = TRUE, ...) {
-  is_i_given = any(deparse(substitute(i)) != "NULL")
-  is_j_given = any(deparse(substitute(j)) != "NULL")
+  expri = deparse1(substitute(i))
+  is_i_given = any(expri != "NULL")
+  vector_of_column_names = deparse1(substitute(j))
+  is_j_given = any(vector_of_column_names != "NULL")
   tbl = data.table::copy(obj$inputs)
   tblj = tbl
   if (is_j_given) {
-    tblj = tbl[, j, with = with]
+    selectj = unique(c("pair", vector_of_column_names))
+    tblj = base::subset(tblj, select = selectj) 
   }
+  colmap = as.list(names(tblj))
+  names(colmap) = names(tblj)
   tbli = tblj
   if (is_i_given) {
     tbli = tblj[i,,with = with]
   }
   # obj_out$inputs = tbli
-  obj_out = Skilift::Cohort$new(tbli, reference_name = obj$reference_name)
+  obj_out = Skilift::Cohort$new(x = NULL, reference_name = obj$reference_name)
+  obj_out$inputs = tblj[]
   invisible(obj_out$inputs[])
   return(obj_out)
 }
