@@ -892,7 +892,6 @@ create_oncotable <- function(
 #' @param oncotable oncotable task output
 #' @param jabba_gg JaBbA output ggraph or complex
 #' @param out_file path to write json
-#' @param temp_fix TRUE/FALSE whether to apply temporary fix
 #' @param return_table TRUE/FALSE whether to return the data.table
 #' @return data.table or NULL
 #' @export
@@ -1003,6 +1002,7 @@ create_filtered_events <- function(
       if (temp_fix) {
         res.cn.dt <- res.cn.dt[!(type == "homdel" & cn != 0), ]
         res.cn.dt <- res.cn.dt[!(type == "amp" & cn <= 2), ]
+
       }
       res.cn.dt[, c("cn", "cn.high", "cn.low", "width", "strand") := NULL] # make null, already added to Variant
       res.final <- rbind(res.mut, res.cn.dt, res.fus, fill = TRUE)
@@ -1050,7 +1050,6 @@ lift_filtered_events <- function(cohort, output_data_dir, cores = 1, return_tabl
         stop("Missing required columns in cohort: ", paste(missing_cols, collapse = ", "))
     }
     
-    cohort_type = cohort$cohort_type
     # Process each sample in parallel
     lst_outs = mclapply(seq_len(nrow(cohort$inputs)), function(i) {
         row <- cohort$inputs[i,]

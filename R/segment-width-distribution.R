@@ -58,6 +58,7 @@ get_segstats <- function(
     segstats_dt <- gr2dt(segstats)
     names(segstats_dt) <- gsub("\\.", "_", names(segstats_dt))
     return(segstats_dt)
+
 }
 
 #' @name lift_segment_width_distribution
@@ -71,7 +72,11 @@ get_segstats <- function(
 #' @param cores Number of cores for parallel processing (default: 1)
 #' @return None
 #' @export
-lift_segment_width_distribution <- function(cohort, output_data_dir, annotations = NULL, cores = 1) {
+lift_segment_width_distribution <- function(
+    cohort,
+    output_data_dir,
+    cores = 1
+) {
     if (!inherits(cohort, "Cohort")) {
         stop("Input must be a Cohort object")
     }

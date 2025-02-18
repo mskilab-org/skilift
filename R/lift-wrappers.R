@@ -1,66 +1,66 @@
-  #' lift wrapper helper function
-  #' 
-  #' Helper function to check if required columns exist
-  has_required_columns <- function(cohort, columns, any=FALSE) {
-    if (any) {
-      return(any(columns %in% names(cohort$inputs)))
-    }
-    all(columns %in% names(cohort$inputs))
+#' lift wrapper helper function
+#' 
+#' Helper function to check if required columns exist
+has_required_columns <- function(cohort, columns, any=FALSE) {
+  if (any) {
+    return(any(columns %in% names(cohort$inputs)))
   }
+  all(columns %in% names(cohort$inputs))
+}
 
 
-  #' Define required columns for each lifter
-  required_columns <- list(
-    allelic_copy_number_graph = c("allelic_jabba_gg"),
-    total_copy_number_graph = c("events"),
-    denoised_coverage = c("tumor_coverage"),
-    oncotable = c(
-      "somatic_variant_annotations",
-      "fusions",
-      "jabba_gg",
-      "karyograph",
-      "events",
-      "signature_counts",
-      "oncokb_snv",
-      "oncokb_cna",
-      "oncokb_fusions"
-    ),
-    filtered_events = c("oncotable", "jabba_gg"),
-    aggregated_events = "aggregated_events",
-    highlighted_events = "highlighted_events",
-    hetsnps = c("het_pileups"),
-    germline_multiplicity = c("germline_multiplicity"),
-    multiplicity = c("multiplicity"),
-    segment_width = c("balanced_jabba_gg", "tumor_coverage"),
-    pp_plot = c("jabba_gg", "het_pileups"),
-    signatures = c(
-      "matrix_sbs_signatures",
-      "decomposed_sbs_signatures",
-      "matrix_indel_signatures",
-      "decomposed_indel_signatures"
-    ),
-    variant_qc = c("somatic_snvs"),
-    metadata = c(
-      "tumor_type",
-      "disease",
-      "primary_site",
-      "inferred_sex",
-      "jabba_gg",
-      "events",
-      "somatic_snvs",
-      "germline_snvs",
-      "tumor_coverage",
-      "estimate_library_complexity",
-      "alignment_summary_metrics",
-      "insert_size_metrics",
-      "wgs_metrics",
-      "het_pileups",
-      "activities_sbs_signatures",
-      "activities_indel_signatures",
-      "hrdetect",
-      "onenesstwoness"
-    )
+#' Define required columns for each lifter
+required_columns <- list(
+  allelic_copy_number_graph = c("allelic_jabba_gg"),
+  total_copy_number_graph = c("jabba_gg"),
+  denoised_coverage = c("tumor_coverage"),
+  oncotable = c( # any subset of these columns will work
+    "somatic_variant_annotations",
+    "fusions",
+    "jabba_gg",
+    "karyograph",
+    "events",
+    "signature_counts",
+    "oncokb_snv",
+    "oncokb_cna",
+    "oncokb_fusions"
+  ),
+  filtered_events = c("oncotable", "jabba_gg"),
+  aggregated_events = "aggregated_events",
+  highlighted_events = "highlighted_events",
+  hetsnps = c("het_pileups"),
+  germline_multiplicity = c("germline_multiplicity"),
+  multiplicity = c("multiplicity"),
+  segment_width = c("balanced_jabba_gg", "tumor_coverage"),
+  pp_plot = c("jabba_gg", "het_pileups"),
+  signatures = c(
+    "matrix_sbs_signatures",
+    "decomposed_sbs_signatures",
+    "matrix_indel_signatures",
+    "decomposed_indel_signatures"
+  ),
+  variant_qc = c("somatic_snvs"),
+  metadata = c( # any subset of these columns will work
+    "tumor_type",
+    "disease",
+    "primary_site",
+    "inferred_sex",
+    "jabba_gg",
+    "events",
+    "somatic_snvs",
+    "germline_snvs",
+    "tumor_coverage",
+    "estimate_library_complexity",
+    "alignment_summary_metrics",
+    "insert_size_metrics",
+    "wgs_metrics",
+    "het_pileups",
+    "activities_sbs_signatures",
+    "activities_indel_signatures",
+    "hrdetect",
+    "onenesstwoness"
   )
+)
 
 
 #' Run all lift methods on a cohort
@@ -71,18 +71,6 @@
 #' @param cohort Cohort object containing sample information
 #' @param output_data_dir Base directory for output files
 #' @param cores Number of cores for parallel processing (default: 1)
-#' @param settings Settings path for copy number graph
-#' @param is_allelic Boolean for copy number graph processing (default: FALSE)
-#' @param max_cn Maximum copy number for graph (default: 100)
-#' @param annotations List of annotations for copy number graph and segment width distribution
-#' @param cohort_column Field in cohort inputs table for coverage track (default: "tumor_coverage")
-#' @param coverage_field Field specifying values to write to arrow (default: "foreground")
-#' @param color_field Field specifying color values
-#' @param bin.width Bin width for coverage track
-#' @param is_germline Logical for multiplicity (default: FALSE)
-#' @param node_metadata Additional columns for multiplicity
-#' @param field Field for multiplicity (default: "total_copies")
-#' @param genome_length Chromosome names for metadata
 #' @param ... Additional arguments
 #'
 #' @return None
@@ -124,14 +112,15 @@ lift_all <- function(
   }
   
 
-  message("Uploading in ", cohort$cohort_type, " mode")
+  message("Uploading in ", cohort$type, " mode")
 
-  if (cohort$cohort_type == "paired") {
+  if (cohort$type == "paired") {
     lift_paired(
       cohort = cohort, 
       output_data_dir = output_data_dir,  
       oncotable_dir = oncotable_dir,
       cores = cores,
+
       settings = settings,
       max_cn = max_cn,
       annotations = annotations,
@@ -143,7 +132,7 @@ lift_all <- function(
       genome_length = genome_length,
       ... = ...
     )
-  } else if (cohort$cohort_type == "heme") {
+  } else if (cohort$type == "heme") {
     lift_heme(
       cohort = cohort, 
       output_data_dir = output_data_dir,  
@@ -158,9 +147,10 @@ lift_all <- function(
       node_metadata = node_metadata,
       multiplicity_field = multiplicity_field,
       genome_length = genome_length,
+
       ... = ...
     )
-  } else if (cohort$cohort_type == "tumor_only") {
+  } else if (cohort$type == "tumor_only") {
     lift_tumor_only(
       cohort = cohort, 
       output_data_dir = output_data_dir,  
@@ -175,6 +165,7 @@ lift_all <- function(
       node_metadata = node_metadata,
       multiplicity_field = multiplicity_field,
       genome_length = genome_length,
+
       ... = ...
     )
   }
@@ -185,46 +176,35 @@ lift_all <- function(
   }
 }
 
-
-
-lift_tumor_only = function(cohort, output_data_dir, ...) {
-
-  if (has_required_columns(cohort, Skilift:::required_columns$allelic_copy_number_graph)) {
-    lift_copy_number_graph(
-      cohort = cohort,
-      output_data_dir = output_data_dir,
-      cores = cores,
-      settings = settings,
-      is_allelic = TRUE,
-      max_cn = max_cn,
-      annotations = annotations
-    )
-  }
+#' Run MVP (Minimum Viable Product) lift methods
+#'
+#' Helper function containing the common lift methods used across different modes
+#' 
+#' @inheritParams lift_all
+#' @param oncotable_dir Directory for oncotable outputs
+#' 
+#' @return Modified cohort object if oncotable is created, otherwise NULL
+lift_mvp <- function(cohort, output_data_dir, oncotable_dir, cores, ...) {
+  list2env(list(...), envir = environment())
   
-  if (has_required_columns(cohort, Skilift:::required_columns$total_copy_number_graph)) {
+  if (has_required_columns(cohort, required_columns$total_copy_number_graph)) {
     lift_copy_number_graph(
       cohort = cohort,
       output_data_dir = output_data_dir,
       cores = cores,
-      settings = settings,
-      is_allelic = FALSE,
-      max_cn = max_cn,
-      annotations = annotations
+      is_allelic = FALSE
     )
   }
 
-  if (has_required_columns(cohort, Skilift:::required_columns$denoised_coverage)) {
+  if (has_required_columns(cohort, required_columns$denoised_coverage)) {
     lift_denoised_coverage(
       cohort = cohort,
       output_data_dir = output_data_dir,
-      cores = cores,
-      coverage_field = coverage_field,
-      color_field = color_field,
-      bin.width = bin.width
+      cores = cores
     )
   }
 
-  if (has_required_columns(cohort, Skilift:::required_columns$hetsnps)) {
+  if (has_required_columns(cohort, required_columns$hetsnps)) {
     lift_hetsnps(
       cohort = cohort,
       output_data_dir = output_data_dir,
@@ -232,16 +212,14 @@ lift_tumor_only = function(cohort, output_data_dir, ...) {
     )
   }
 
-
-
   if (has_required_columns(cohort, Skilift:::required_columns$filtered_events)) {
+
     lift_filtered_events(
       cohort = cohort,
       output_data_dir = output_data_dir,
       cores = cores
     )
-  # oncotable doesn't need every single column, just any one of them
-  } else if (has_required_columns(cohort, Skilift:::required_columns$oncotable, any = TRUE)) {
+  } else if (has_required_columns(cohort, required_columns$oncotable, any = TRUE)) {
     cohort <- create_oncotable(
       cohort = cohort,
       outdir = oncotable_dir,
@@ -254,6 +232,7 @@ lift_tumor_only = function(cohort, output_data_dir, ...) {
       cores = cores
     )
   }
+
 
   if (has_required_columns(cohort, Skilift:::required_columns$multiplicity)) {
     lift_multiplicity(
@@ -277,25 +256,15 @@ lift_tumor_only = function(cohort, output_data_dir, ...) {
     )
   }
 
-  if (has_required_columns(cohort, Skilift:::required_columns$segment_width)) {
+  if (has_required_columns(cohort, required_columns$segment_width)) {
     lift_segment_width_distribution(
-      cohort = cohort,
-      output_data_dir = output_data_dir,
-      cores = cores,
-      annotations = annotations
-    )
-  }
-
-
-  if (has_required_columns(cohort, Skilift:::required_columns$signatures)) {
-    lift_signatures(
       cohort = cohort,
       output_data_dir = output_data_dir,
       cores = cores
     )
   }
 
-  if (has_required_columns(cohort, Skilift:::required_columns$variant_qc)) {
+  if (has_required_columns(cohort, required_columns$variant_qc)) {
     lift_variant_qc(
       cohort = cohort,
       output_data_dir = output_data_dir,
@@ -303,7 +272,7 @@ lift_tumor_only = function(cohort, output_data_dir, ...) {
     )
   }
 
-  if (has_required_columns(cohort, Skilift:::required_columns$metadata)) {
+  if (has_required_columns(cohort, required_columns$metadata)) {
     lift_metadata(
       cohort = cohort,
       output_data_dir = output_data_dir,
@@ -312,60 +281,15 @@ lift_tumor_only = function(cohort, output_data_dir, ...) {
     )
   }
 
-  if (has_required_columns(cohort, Skilift:::required_columns$pp_plot)) {
+  if (has_required_columns(cohort, required_columns$pp_plot)) {
     lift_pp_plot(
       cohort = cohort, 
       output_data_dir = output_data_dir
     )
   }
-  
+
+  return(cohort)
 }
-
-lift_heme = function(cohort, output_data_dir, ...) {
-  list2env(list(...), envir = environment())
-
-  if (has_required_columns(cohort, Skilift:::required_columns$allelic_copy_number_graph)) {
-    lift_copy_number_graph(
-      cohort = cohort,
-      output_data_dir = output_data_dir,
-      cores = cores,
-      settings = settings,
-      is_allelic = TRUE,
-      max_cn = max_cn,
-      annotations = annotations
-    )
-  }
-  
-  if (has_required_columns(cohort, Skilift:::required_columns$total_copy_number_graph)) {
-    lift_copy_number_graph(
-      cohort = cohort,
-      output_data_dir = output_data_dir,
-      cores = cores,
-      settings = settings,
-      is_allelic = FALSE,
-      max_cn = max_cn,
-      annotations = annotations
-    )
-  }
-
-  if (has_required_columns(cohort, Skilift:::required_columns$denoised_coverage)) {
-    lift_denoised_coverage(
-      cohort = cohort,
-      output_data_dir = output_data_dir,
-      cores = cores,
-      coverage_field = coverage_field,
-      color_field = color_field,
-      bin.width = bin.width
-    )
-  }
-
-  if (has_required_columns(cohort, Skilift:::required_columns$hetsnps)) {
-    lift_hetsnps(
-      cohort = cohort,
-      output_data_dir = output_data_dir,
-      cores = cores
-    )
-  }
 
   # oncotable doesn't need every single column, just any one of them
   if (has_required_columns(cohort, Skilift:::required_columns$oncotable, any = TRUE)) {
@@ -393,18 +317,21 @@ lift_heme = function(cohort, output_data_dir, ...) {
     )
   }
 
-  if (has_required_columns(cohort, Skilift:::required_columns$multiplicity)) {
-    lift_multiplicity(
+
+  if (has_required_columns(cohort, required_columns$allelic_copy_number_graph)) {
+    lift_copy_number_graph(
       cohort = cohort,
       output_data_dir = output_data_dir,
       cores = cores,
+
       is_germline = FALSE,
       node_metadata = node_metadata,
       field = multiplicity_field
+
     )
   }
 
-  if (has_required_columns(cohort, Skilift:::required_columns$germline_multiplicity)) {
+  if (has_required_columns(cohort, required_columns$germline_multiplicity)) {
     lift_multiplicity(
       cohort = cohort,
       output_data_dir = output_data_dir,
@@ -438,47 +365,29 @@ lift_heme = function(cohort, output_data_dir, ...) {
       output_data_dir = output_data_dir,
       cores = cores,
       genome_length = genome_length
+
     )
   }
 
-  if (has_required_columns(cohort, Skilift:::required_columns$pp_plot)) {
-    lift_pp_plot(
-      cohort = cohort, 
-      output_data_dir = output_data_dir
-    )
-  }
   
-
-  if (has_required_columns(cohort, Skilift:::required_columns$karyotype)) {
+  # Heme-specific warnings for unimplemented features
+  if (has_required_columns(cohort, required_columns$karyotype)) {
     warning("not implemented yet")
   }
 
-  if (has_required_columns(cohort, Skilift:::required_columns$aggregated_events)) {
+  if (has_required_columns(cohort, required_columns$aggregated_events)) {
     warning("not implemented yet")
   }
 
-  if (has_required_columns(cohort, Skilift:::required_columns$highlighted_events)) {
+  if (has_required_columns(cohort, required_columns$highlighted_events)) {
     warning("not implemented yet")
   }
-
-  
 }
 
-lift_paired = function(cohort, output_data_dir, ...) {
+lift_paired <- function(cohort, output_data_dir, oncotable_dir, cores, ...) {
+  cohort <- lift_mvp(cohort, output_data_dir, oncotable_dir, cores, ...)
 
-  if (has_required_columns(cohort, Skilift:::required_columns$allelic_copy_number_graph)) {
-    lift_copy_number_graph(
-      cohort = cohort,
-      output_data_dir = output_data_dir,
-      cores = cores,
-      settings = settings,
-      is_allelic = TRUE,
-      max_cn = max_cn,
-      annotations = annotations
-    )
-  }
-  
-  if (has_required_columns(cohort, Skilift:::required_columns$total_copy_number_graph)) {
+  if (has_required_columns(cohort, required_columns$allelic_copy_number_graph)) {
     lift_copy_number_graph(
       cohort = cohort,
       output_data_dir = output_data_dir,
@@ -539,10 +448,11 @@ lift_paired = function(cohort, output_data_dir, ...) {
       is_germline = FALSE,
       node_metadata = node_metadata,
       field = multiplicity_field
+
     )
   }
 
-  if (has_required_columns(cohort, Skilift:::required_columns$germline_multiplicity)) {
+  if (has_required_columns(cohort, required_columns$germline_multiplicity)) {
     lift_multiplicity(
       cohort = cohort,
       output_data_dir = output_data_dir,
@@ -566,31 +476,15 @@ lift_paired = function(cohort, output_data_dir, ...) {
       output_data_dir = output_data_dir,
       cores = cores,
       annotations = annotations
+
     )
   }
-
-  if (has_required_columns(cohort, Skilift:::required_columns$signatures)) {
+  
+  if (has_required_columns(cohort, required_columns$signatures)) {
     lift_signatures(
       cohort = cohort,
       output_data_dir = output_data_dir,
       cores = cores
-    )
-  }
-
-  if (has_required_columns(cohort, Skilift:::required_columns$variant_qc)) {
-    lift_variant_qc(
-      cohort = cohort,
-      output_data_dir = output_data_dir,
-      cores = cores
-    )
-  }
-
-  if (has_required_columns(cohort, Skilift:::required_columns$metadata)) {
-    lift_metadata(
-      cohort = cohort,
-      output_data_dir = output_data_dir,
-      cores = cores,
-      genome_length = genome_length
     )
   }
 }
