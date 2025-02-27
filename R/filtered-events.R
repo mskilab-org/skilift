@@ -188,8 +188,15 @@ collect_copy_number_jabba <- function(
   
   if (verbose) message('pulling jabba_rds to get SCNA and purity / ploidy')
   jab <- readRDS(jabba_rds)
-  jabpurity <- ifelse(!is.null(jab$meta$purity), jab$meta$purity, jab$purity)  
-  jabploidy <- ifelse(!is.null(jab$meta$ploidy), jab$meta$ploidy, jab$ploidy)
+
+  jabpurity = jabploidy = NA_real_
+  
+  if (!is.null(jab$meta$purity))
+    jabpurity = jab$meta$purity
+
+  if (!is.null(jab$meta$ploidy))
+    jabploidy = jab$meta$ploidy
+
   result <- data.table(
     value = c(jabpurity, jabploidy),
     type = c('purity', 'ploidy'),
@@ -666,6 +673,7 @@ oncotable = function(
     fill = TRUE,
     use.names = TRUE
   )
+
 
   ## collect copy number
   # prefer oncokb cna
