@@ -1,7 +1,7 @@
 #' lift wrapper helper function
-#' 
+#'
 #' Helper function to check if required columns exist
-has_required_columns <- function(cohort, columns, any=FALSE) {
+has_required_columns <- function(cohort, columns, any = FALSE) {
   if (any) {
     return(any(columns %in% names(cohort$inputs)))
   }
@@ -76,12 +76,10 @@ required_columns <- list(
 #' @return None
 #' @export
 lift_all <- function(
-  cohort,
-  output_data_dir,
-  cores = 1,
-  ...
-) {
-  
+    cohort,
+    output_data_dir,
+    cores = 1,
+    ...) {
   # make sure pair is in cohort
   if (!"pair" %in% names(cohort$inputs)) {
     stop("Missing required column in cohort: pair")
@@ -95,42 +93,42 @@ lift_all <- function(
   }
 
   if (!is.null(cohort$nextflow_results_path)) {
-    oncotable_dir = file.path(cohort$nextflow_results_path, "oncotable")
+    oncotable_dir <- file.path(cohort$nextflow_results_path, "oncotable")
   } else {
-    oncotable_dir = file.path(output_data_dir, "oncotable")
-    warning("Oncotable outputs will be placed in: ", oncotable_dir)
+    oncotable_dir <- file.path(output_data_dir, "oncotable")
+    message("Oncotable outputs will be placed in: ", oncotable_dir)
   }
-  
+
 
   message("Uploading in ", cohort$type, " mode")
 
   if (cohort$type == "paired") {
     lift_paired(
-      cohort = cohort, 
-      output_data_dir = output_data_dir,  
+      cohort = cohort,
+      output_data_dir = output_data_dir,
       oncotable_dir = oncotable_dir,
       cores = cores,
       ... = ...
     )
   } else if (cohort$type == "heme") {
     lift_heme(
-      cohort = cohort, 
-      output_data_dir = output_data_dir,  
+      cohort = cohort,
+      output_data_dir = output_data_dir,
       oncotable_dir = oncotable_dir,
       cores = cores,
       ... = ...
     )
   } else if (cohort$type == "tumor_only") {
     lift_tumor_only(
-      cohort = cohort, 
-      output_data_dir = output_data_dir,  
+      cohort = cohort,
+      output_data_dir = output_data_dir,
       oncotable_dir = oncotable_dir,
       cores = cores,
       ... = ...
     )
   }
 
-  datafiles_json_path = file.path(dirname(output_data_dir), "datafiles.json")
+  datafiles_json_path <- file.path(dirname(output_data_dir), "datafiles.json")
   if (!file.exists(datafiles_json_path)) {
     warning("Creating datafiles.json directory")
   }
@@ -139,14 +137,14 @@ lift_all <- function(
 #' Run MVP (Minimum Viable Product) lift methods
 #'
 #' Helper function containing the common lift methods used across different modes
-#' 
+#'
 #' @inheritParams lift_all
 #' @param oncotable_dir Directory for oncotable outputs
-#' 
+#'
 #' @return Modified cohort object if oncotable is created, otherwise NULL
 lift_mvp <- function(cohort, output_data_dir, oncotable_dir, cores, ...) {
   list2env(list(...), envir = environment())
-  
+
   if (has_required_columns(cohort, required_columns$total_copy_number_graph)) {
     lift_copy_number_graph(
       cohort = cohort,
@@ -227,7 +225,7 @@ lift_mvp <- function(cohort, output_data_dir, oncotable_dir, cores, ...) {
 
   if (has_required_columns(cohort, required_columns$pp_plot)) {
     lift_pp_plot(
-      cohort = cohort, 
+      cohort = cohort,
       output_data_dir = output_data_dir
     )
   }
@@ -261,7 +259,7 @@ lift_heme <- function(cohort, output_data_dir, oncotable_dir, cores, ...) {
     )
   }
 
-  
+
   # Heme-specific warnings for unimplemented features
   if (has_required_columns(cohort, required_columns$karyotype)) {
     warning("not implemented yet")
@@ -296,7 +294,7 @@ lift_paired <- function(cohort, output_data_dir, oncotable_dir, cores, ...) {
       is_germline = TRUE
     )
   }
-  
+
   if (has_required_columns(cohort, required_columns$signatures)) {
     lift_signatures(
       cohort = cohort,
@@ -305,4 +303,3 @@ lift_paired <- function(cohort, output_data_dir, oncotable_dir, cores, ...) {
     )
   }
 }
-
