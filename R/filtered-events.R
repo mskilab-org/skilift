@@ -369,7 +369,9 @@ get_gene_copy_numbers <- function(
   simplify_seqnames = FALSE, 
   mfields = c("gene_name", "source", "gene_id", "gene_type", "level", "hgnc_id", "havana_gene"), 
   output_type = "data.table",
-  min_width = 1e3
+  min_width = 1e3,
+  min_cn_quantile_threshold = 0.1,
+  max_cn_quantile_threshold = 0.9
 ) {
     if (is.character(gg)) {
         gg = readRDS(gg)
@@ -418,11 +420,57 @@ get_gene_copy_numbers <- function(
     #   ## gene_width = gene_width[1]
     # ), by = gene_name]
 
+    gene_cn_segments[, ix := seq_len(.N)]
+
+	# Order by copy number 
+	reord_gene_cn_segments = data.table::copy(gene_cn_segments[order(cn)])
+	reord_gene_cn_segments[
+		,
+		c("weight", "total_weight", "cweight", "from_cfrac", "to_cfrac", "is_at_min_quantile_threshold", "is_at_max_quantile_threshold") := {
+			weight = width # Should the weight just be width? This would make it a true quantile
+			# weight = width * (cn + 1e-9) # take care of 0's with a fudge factor
+			total_weight = sum(weight)
+			cweight = cumsum(weight)
+			to_cfrac = cweight / total_weight
+            ## setting lowest to something ridiculous to make sure argument of 0 works
+			from_cfrac = c(-1e9, to_cfrac[-.N])
+            ## setting highest to something ridiculous to make sure argument of 1 works
+            to_cfrac[.N] = 1e9
+			## interval is semi-closed - (from_cfrac, to_cfrac] (inclusive of to_cfrac, but not from_cfrac)
+			## so any interval included where from_cfrac is greater than or equal to threshold should be excluded
+			is_at_min_quantile_threshold = (
+				data.table::between(min_cn_quantile_threshold, from_cfrac, to_cfrac) 
+				& !from_cfrac >= min_cn_quantile_threshold
+			)
+			is_at_max_quantile_threshold = (
+				data.table::between(max_cn_quantile_threshold, from_cfrac, to_cfrac) 
+				& !from_cfrac >= max_cn_quantile_threshold
+			)
+			list(weight, total_weight, cweight, from_cfrac, to_cfrac, is_at_min_quantile_threshold, is_at_max_quantile_threshold)
+		}
+		,
+		by = gene_name
+	]
+    
+	gene_cn_segments = reord_gene_cn_segments[order(ix)]
+
+	null_out_columns = c("ix")
+	for (col in null_out_columns) {
+		gene_cn_segments[[col]] = NULL
+	}
+
+
+
+
     gene_cn_table = gene_cn_segments[, `:=`(
       max_normalized_cn = max(normalized_cn, na.rm = TRUE),
       max_cn = max(cn, na.rm = TRUE),
+	  max_quantile_cn = cn[is_at_max_quantile_threshold],
+	  max_quantile_normalized_cn = normalized_cn[is_at_max_quantile_threshold],
       min_normalized_cn = min(normalized_cn, na.rm = TRUE),
       min_cn = min(cn, na.rm = TRUE),
+	  min_quantile_cn = cn[is_at_min_quantile_threshold],
+	  min_quantile_normalized_cn = normalized_cn[is_at_min_quantile_threshold],
       avg_normalized_cn = sum(normalized_cn * width, na.rm = TRUE) / sum(width),
       avg_cn = sum(cn * width, na.rm = TRUE) / sum(width),
       # total_node_width = sum(width, na.rm = TRUE),
@@ -475,15 +523,22 @@ get_gene_copy_numbers <- function(
 #' amplifications and deletions
 #'
 #' @param jab character path to jabba file or gGraph object
-get_gene_ampdels_from_jabba <- function(jab, pge, amp.thresh = 4, del.thresh = 0.5, nseg = NULL) {
+get_gene_ampdels_from_jabba <- function(jab, pge, amp.thresh = 4, del.thresh = 0.5, nseg = NULL, min_cn_quantile_threshold = 0.1, max_cn_quantile_threshold = 0.9) {
   gg <- jab
   if (!inherits(gg, "gGraph")) {
     gg <- gG(jabba = jab)
   }
-  gene_CN <- Skilift:::get_gene_copy_numbers(gg, gene_ranges = pge, nseg = nseg)
+  gene_CN <- Skilift:::get_gene_copy_numbers(
+	gg, 
+	gene_ranges = pge, 
+	nseg = nseg, 
+	min_cn_quantile_threshold = min_cn_quantile_threshold, 
+	max_cn_quantile_threshold = max_cn_quantile_threshold
+)
   gene_CN[, `:=`(type, NA_character_)]
 
-  gene_CN[min_normalized_cn >= amp.thresh, `:=`(type, "amp")]
+#   gene_CN[min_normalized_cn >= amp.thresh, `:=`(type, "amp")]
+  gene_CN[min_quantile_normalized_cn >= amp.thresh, `:=`(type, "amp")]
   gene_CN[min_cn > 1 & min_normalized_cn < del.thresh, `:=`(
     type,
     "del"
@@ -491,14 +546,20 @@ get_gene_ampdels_from_jabba <- function(jab, pge, amp.thresh = 4, del.thresh = 0
   gene_CN[min_cn == 1 & min_cn < ncn, `:=`(type, "hetdel")]
   gene_CN[min_cn == 0, `:=`(type, "homdel")]
 
+  gene_CN[type == "amp", min_cn := min_quantile_cn]
+
   # scna_result = gene_CN[!is.na(type)]
   scna_result = (
       gene_CN[, 
       .(
         max_normalized_cn = max_normalized_cn[1],
         max_cn = max_cn[1],
+		max_quantile_cn = max_quantile_cn[1],
+		max_quantile_normalized_cn = max_quantile_normalized_cn[1],
         min_normalized_cn = min_normalized_cn[1],
         min_cn = min_cn[1],
+		min_quantile_cn = min_quantile_cn[1],
+		min_quantile_normalized_cn = min_quantile_normalized_cn[1],
         avg_normalized_cn = avg_normalized_cn[1],
         avg_cn = avg_cn[1],
         number_of_cn_segments = number_of_cn_segments[1],
@@ -533,7 +594,9 @@ collect_copy_number_jabba <- function(
     amp.thresh,
     del.thresh,
     verbose = TRUE,
-    karyograph = NULL) {
+    karyograph = NULL,
+	min_cn_quantile_threshold = 0.1,
+	max_cn_quantile_threshold = 0.9) {
   if (is.null(jabba_rds) || !file.exists(jabba_rds)) {
     if (verbose) message("Jabba RDS file is missing or does not exist.")
     return(data.table(type = NA, source = "jabba_rds"))
@@ -567,7 +630,9 @@ collect_copy_number_jabba <- function(
     amp.thresh = amp.thresh,
     del.thresh = del.thresh,
     pge = pge,
-    nseg = nseg
+    nseg = nseg,
+	min_cn_quantile_threshold = min_cn_quantile_threshold,
+	max_cn_quantile_threshold = max_cn_quantile_threshold
   )
 
   if (nrow(scna)) {
@@ -682,7 +747,7 @@ collect_gene_mutations <- function(
 #' @param oncokb_cna Path to the oncokb CNA file.
 #' @param verbose Logical flag to indicate if messages should be printed.
 #' @return A data.table containing processed OncoKB CNA information.
-collect_oncokb_cna <- function(oncokb_cna, jabba_gg, pge, amp.thresh, del.thresh, karyograph = NULL, verbose = TRUE) {
+collect_oncokb_cna <- function(oncokb_cna, jabba_gg, pge, amp.thresh, del.thresh, karyograph = NULL, verbose = TRUE, min_cn_quantile_threshold = 0.1, max_cn_quantile_threshold = 0.9) {
   if (is.null(oncokb_cna) || !file.exists(oncokb_cna)) {
     if (verbose) message("OncoKB CNA file is missing or does not exist.")
     return(data.table(type = NA, source = "oncokb_cna"))
@@ -700,7 +765,9 @@ collect_oncokb_cna <- function(oncokb_cna, jabba_gg, pge, amp.thresh, del.thresh
       amp.thresh = amp.thresh,
       del.thresh = del.thresh,
       pge = pge,
-      nseg = nseg
+      nseg = nseg,
+	  min_cn_quantile_threshold = 0.1, 
+	  max_cn_quantile_threshold = 0.9
   ) 
 
   matches = list(
@@ -969,24 +1036,35 @@ parse_oncokb_tier <- function(
 #' @param verbose Logical flag to indicate if messages should be printed.
 #' @return A data.table containing processed OncoKB mutation information.
 collect_oncokb <- function(oncokb_maf, multiplicity = NA_character_, verbose = TRUE) {
-  if (is.null(oncokb_maf) || !file.exists(oncokb_maf)) {
+  
+  empty_output_oncokb = data.table(type = NA, source = "oncokb_maf")
+  if (missing(oncokb_maf) || is.null(oncokb_maf) || !file.exists(oncokb_maf)) {
     if (verbose) message("OncoKB MAF file is missing or does not exist.")
-    return(data.table(type = NA, source = "oncokb_maf"))
+    return(empty_output_oncokb)
   }
 
   # snpeff_ontology = readRDS(system.file("extdata", "data", "snpeff_ontology.rds", package = "Skilift"))
   oncokb <- data.table::fread(oncokb_maf)
-  if (
-    is.character(multiplicity) &&
-      NROW(multiplicity) == 1 &&
-      file.exists(multiplicity)
-  ) {
+  is_multiplicity_present = is.character(multiplicity) && NROW(multiplicity) == 1 && !is_loosely_na(multiplicity) && file.exists(multiplicity)
+  is_oncokb_populated = NROW(oncokb) > 0
+  
+  is_multiplicity_populated = FALSE
+  if (is_multiplicity_present) {
     multiplicity <- readRDS(multiplicity)
-    oncokb <- merge_oncokb_multiplicity(oncokb, multiplicity, overwrite = TRUE)
+	is_multiplicity_populated = NROW(multiplicity) > 0
   }
 
-  if (NROW(oncokb) > 0) {
+  if (is_oncokb_populated && !is_multiplicity_populated) {
+  	stop("Something's off - oncokb is populated with variants, but not multiplicity.")
+  }
+  
+  if (is_oncokb_populated && is_multiplicity_populated) {
+  	oncokb <- merge_oncokb_multiplicity(oncokb, multiplicity, overwrite = TRUE)
+  }
+
+  if (is_oncokb_populated) {
     ## oncokb$snpeff_ontology <- snpeff_ontology$short[match(oncokb$Consequence, snpeff_ontology$eff)]
+	
     oncokb$short <- dplyr::case_when(
       grepl("frameshift", oncokb$Consequence) & grepl("fs$", oncokb$HGVSp) ~ "trunc",
       grepl("stop", oncokb$Consequence) & grepl("^p\\.", oncokb$HGVSp) ~ "trunc",
@@ -1049,7 +1127,7 @@ collect_oncokb <- function(oncokb_maf, multiplicity = NA_character_, verbose = T
       source = "oncokb_maf"
     )])
   }
-  return(data.table(type = NA, source = "oncokb_maf"))
+  return(empty_output_oncokb)
 }
 
 
@@ -1800,6 +1878,19 @@ merge_oncokb_multiplicity <- function(
     }
   }
   S4Vectors::mcols(gr_multiplicity) <- mc
+  is_oncokb_empty = NROW(gr_oncokb) == 0
+  is_multiplicity_empty = NROW(gr_multiplicity) == 0
+
+  # oncokb should always be a data.table at this point, regardless whether empty or not 
+  # (columns are always there)
+  columns_to_assign_na_in_oncokb = cols.keep[!cols.keep %in% names(oncokb)] 
+  if (is_oncokb_empty || is_multiplicity_empty)  {
+	for (col in columns_to_assign_na_in_oncokb) {
+		oncokb[[col]] = rep_len(NA, NROW(oncokb))
+	}
+	return(oncokb) ## Should be returned as original empty data.table + multiplicity columns (na'd for downstream robustness)
+  }
+
   ov <- gUtils::gr.findoverlaps(gr_oncokb, gr_multiplicity, by = c("gene", "ALT"), type = "equal")
   ovQuery <- data.table(query.id = integer(0), subject.id = integer(0))
   if (NROW(ov) > 0) {

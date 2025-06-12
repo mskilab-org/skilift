@@ -298,7 +298,17 @@ lift_denoised_coverage <- function(
                 if (!is.null(row$tumor_coverage) && file.exists(row$tumor_coverage)) {
 
                     cov <- row$tumor_coverage %>% readRDS()
-                    mcols(cov)[[row$denoised_coverage_field]] <- mcols(cov)[, row$denoised_coverage_field] * 2 * 151 / width(cov)
+					coverage_values = base::get(row$denoised_coverage_field, as.environment(as.list(mcols(cov))))
+					lst_cov_bool = Skilift::test_coverage_normalized(coverage_values)
+					is_cov_likely_normalized = lst_cov_bool$is_cov_likely_normalized
+					is_cov_near_one = lst_cov_bool$is_cov_near_one
+					if (!is_cov_likely_normalized && !is_cov_near_one) {
+						message("Assuming coverage is in read coverage per bin and paired end, 151 bp reads, rescaling")
+						mcols(cov)[[row$denoised_coverage_field]] = coverage_values * PAIRED_READS_FACTOR * READ_LENGTH / width(cov)
+					} else {
+						message("Assuming coverage is mean-normalized, ignoring rescaling to base coverage")
+					}
+                    # mcols(cov)[[row$denoised_coverage_field]] <- mcols(cov)[, row$denoised_coverage_field] * 2 * 151 / width(cov)
                                         
                     # Create arrow table
                     arrow_table <- granges_to_arrow_scatterplot(

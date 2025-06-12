@@ -123,8 +123,8 @@ add_sex_information <- function(
 ) {
     # Direct sex specification
     if (!is.null(input_inferred_sex)) {
-        if (!input_inferred_sex %in% c("male", "female")) {
-            warning("inferred sex must be one of `male` or `female`")
+        if (!input_inferred_sex %in% c("Male", "Female")) {
+            warning("inferred sex must be one of `Male` or `Female`")
         }
         metadata[, inferred_sex := input_inferred_sex]
         return(metadata)
@@ -137,7 +137,7 @@ add_sex_information <- function(
             (seqnames == "X" | seqnames == "chrX"),
             weighted.mean(cn, w = end - start + 1, na.rm = TRUE)
         ]
-        metadata[, inferred_sex := ifelse(ncn.x < 1.4, "male", "female")]
+        metadata[, inferred_sex := ifelse(ncn.x < 1.4, "Male", "Female")]
         return(metadata)
     }
     
@@ -149,7 +149,7 @@ add_sex_information <- function(
             warning("Could not extract X chromosome coverage from tumor coverage data")
             return(metadata)
         }
-        metadata[, inferred_sex := ifelse(ncn.x < 0.7, "male", "female")]
+        metadata[, inferred_sex := ifelse(ncn.x < 0.7, "Male", "Female")]
         return(metadata)
     }
     
@@ -724,7 +724,17 @@ add_coverage_parameters <- function(metadata, tumor_coverage, field = "foregroun
             warning("Purity and ploidy not found in metadata, cov_slope and cov_intercept will not be calculated")
         }
         cov <- tumor_coverage %>% readRDS()
-        mcols(cov)[[field]] <- mcols(cov)[, field] * 2 * 151 / width(cov)
+		coverage_values = base::get0(field, as.environment(as.list(mcols(cov))), ifnotfound = NULL)
+		lst_cov_bool = Skilift::test_coverage_normalized(coverage_values)
+		is_cov_likely_normalized = lst_cov_bool$is_cov_likely_normalized
+		is_cov_near_one = lst_cov_bool$is_cov_near_one
+		if (!is_cov_likely_normalized && !is_cov_near_one) {
+			message("Assuming coverage is in read coverage per bin and paired end, 151 bp reads, rescaling")
+			mcols(cov)[[field]] = coverage_values * PAIRED_READS_FACTOR * READ_LENGTH / width(cov)
+		} else {
+			message("Assuming coverage is mean-normalized, ignoring rescaling to base coverage")
+		}
+        # mcols(cov)[[field]] <- mcols(cov)[, field] * 2 * 151 / width(cov)
         rel2abs.cov <- skitools::rel2abs(cov,
             field = field,
             purity = metadata$purity,
@@ -1124,7 +1134,7 @@ create_metadata <- function(
     # Add MSIsensor score
     metadata <- add_msisensor_score(metadata, msisensorpro)    
 
-    if (!is_visible) {
+    if (!as.logical(is_visible)) {
         metadata$visible <- FALSE
     }
 
@@ -1185,7 +1195,7 @@ lift_metadata <- function(cohort, output_data_dir, cores = 1, genome_length = c(
     }
     
     # Process each sample in parallel
-    mclapply(seq_len(nrow(lift_inputs)), function(i) {
+    list_metadata = mclapply(seq_len(nrow(lift_inputs)), function(i) {
         row <- lift_inputs[i,]
         pair_dir <- file.path(output_data_dir, row$pair)
         
@@ -1201,6 +1211,25 @@ lift_metadata <- function(cohort, output_data_dir, cores = 1, genome_length = c(
             row$oncokb_snv,
             row$somatic_snvs
         )
+		
+		inferred_sex_field = row$inferred_sex
+
+		purple_qc_path_for_fread = row$purple_qc
+		is_purple_qc_null = is.null(purple_qc_path_for_fread) 
+		is_purple_pp_range_null = is.null(row$purple_pp_range)
+		extracted_purple_qc_path = character(0)
+		if (!is_purple_pp_range_null) {
+			extracted_purple_qc_path = dir(dirname(as.character(row$purple_pp_range)), full.names = TRUE, pattern = ".qc$")
+		}
+		if (is_purple_qc_null && NROW(extracted_purple_qc_path) > 0) {
+			purple_qc_path_for_fread = extracted_purple_qc_path[1]
+		}
+		
+		is_purple_qc_path_valid = NROW(purple_qc_path_for_fread) == 1 && is.character(purple_qc_path_for_fread) && file.exists(purple_qc_path_for_fread)
+		if (is_purple_qc_path_valid) {
+			inferred_sex_field = fread(purple_qc_path_for_fread, header = FALSE)[V1 == "AmberGender"]$V2
+			inferred_sex_field = tools::toTitleCase(tolower(inferred_sex_field))
+		}
         
         futile.logger::flog.threshold("ERROR")
         tryCatchLog({
@@ -1212,7 +1241,7 @@ lift_metadata <- function(cohort, output_data_dir, cores = 1, genome_length = c(
                 tumor_type = row$tumor_type,
                 disease = row$disease,
                 primary_site = row$primary_site,
-                inferred_sex = row$inferred_sex,
+                inferred_sex = inferred_sex_field,
                 jabba_gg = row[[jabba_column]],
                 events = row$events,
                 somatic_snvs = snvs_column,
@@ -1248,6 +1277,8 @@ lift_metadata <- function(cohort, output_data_dir, cores = 1, genome_length = c(
                 pretty = TRUE,
                 null = "null"
             )
+
+			return(metadata)
             
         }, error = function(e) {
             print(sprintf("Error processing %s: %s", row$pair, e$message))
@@ -1255,7 +1286,11 @@ lift_metadata <- function(cohort, output_data_dir, cores = 1, genome_length = c(
         })
     }, mc.cores = cores, mc.preschedule = TRUE)
 
-    invisible(NULL)
+	metadata_tbls = rbindlist(list_metadata)
+	cohort$inputs = merge(cohort$inputs, metadata_tbls, by = "pair")
+
+    # invisible(NULL)
+	return(cohort)
 }
 
 #' @name lift_datafiles_json
@@ -1266,7 +1301,7 @@ lift_metadata <- function(cohort, output_data_dir, cores = 1, genome_length = c(
 #' @param data_dir Directory containing data files
 #' @return None
 #' @export
-lift_datafiles_json <- function(output_data_dir) {
+lift_datafiles_json <- function(output_data_dir, cores = 1) {
   if (!dir.exists(output_data_dir)) {
     stop("Data directory does not exist.")
   }
@@ -1274,7 +1309,7 @@ lift_datafiles_json <- function(output_data_dir) {
   # Recursively look for all files named "metadata.json"
   metadata_files <- list.files(
     path = output_data_dir,
-    pattern = "^metadata\\.json$",
+    pattern = "metadata\\.json$",
     recursive = TRUE,
     full.names = TRUE
   )
@@ -1284,9 +1319,9 @@ lift_datafiles_json <- function(output_data_dir) {
   }
   
   # Read each JSON file and combine them into a list
-  combined_data <- lapply(metadata_files, function(file) {
+  combined_data <- mclapply(metadata_files, function(file) {
     unbox(jsonlite::fromJSON(file))
-  })
+  }, mc.cores = cores)
 
   # Write the combined JSON list to "datafiles.json" in the data directory
   output_file <- file.path(output_data_dir, "datafiles.json")
