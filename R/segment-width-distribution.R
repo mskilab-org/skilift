@@ -106,7 +106,8 @@ lift_segment_width_distribution <- function(
     }
 
     # Validate required columns exist
-    required_cols <- c("pair", "balanced_jabba_gg", "tumor_coverage")
+	jabba_column = Skilift::DEFAULT_JABBA(object = cohort)
+    required_cols <- c("pair", jabba_column, "tumor_coverage")
     missing_cols <- required_cols[!required_cols %in% names(cohort$inputs)]
     if (length(missing_cols) > 0) {
         stop("Missing required columns in cohort: ", paste(missing_cols, collapse = ", "))
@@ -128,15 +129,15 @@ lift_segment_width_distribution <- function(
         futile.logger::flog.threshold("ERROR")
         tryCatchLog(
             {
-                if (!file.exists(row$balanced_jabba_gg)) {
-                    print(sprintf("Balanced JaBbA file not found for %s: %s", row$pair, row$balanced_jabba_gg))
+                if (!file.exists(row[[jabba_column]])) {
+                    print(sprintf("Balanced JaBbA file not found for %s: %s", row$pair, row[[jabba_column]]))
                     return(NULL)
                 }
 
                 # Read the gGraph
-                ggraph <- process_jabba(row$balanced_jabba_gg)
+                ggraph <- process_jabba(row[[jabba_column]])
                 if (!any(class(ggraph) == "gGraph")) {
-                    print(sprintf("File is not a gGraph for %s: %s", row$pair, row$balanced_jabba_gg))
+                    print(sprintf("File is not a gGraph for %s: %s", row$pair, row[[jabba_column]]))
                     return(NULL)
                 }
 
@@ -160,7 +161,7 @@ lift_segment_width_distribution <- function(
                 } else {
                     # Get segstats information
                     segstats.dt <- get_segstats(
-                        balanced_jabba_gg = row$balanced_jabba_gg,
+                        balanced_jabba_gg = row[[jabba_column]],
                         tumor_coverage = row$tumor_coverage
                     )
                     segstats.gr <- GRanges(segstats.dt, seqlengths = seq_lengths) %>% trim()
@@ -220,7 +221,8 @@ lift_allelic_pp_fit <- function(cohort,
     }
 
     # Validate required columns exist
-    required_cols <- c("pair", "jabba_gg", "het_pileups")
+	jabba_column = Skilift::DEFAULT_JABBA(object = cohort)
+    required_cols <- c("pair", jabba_column, "het_pileups")
     missing_cols <- required_cols[!required_cols %in% names(cohort$inputs)]
 
     if (length(missing_cols) > 0) {
@@ -242,7 +244,7 @@ lift_allelic_pp_fit <- function(cohort,
         futile.logger::flog.threshold("ERROR")
         tryCatchLog(
             {
-                ppplot <- Skilift::pp_plot(jabba_rds = row$jabba_gg,
+                ppplot <- Skilift::pp_plot(jabba_rds = row[[jabba_column]],
                         hets.fname = row$het_pileups,
                         allele = TRUE,
                         scatter = TRUE,
@@ -299,12 +301,6 @@ lift_multiplicity_fits <- function(cohort,
         stop("Missing required columns in cohort: ", paste(missing_cols, collapse = ", "))
     }
 
-    lift_allelic_pp_fit(
-        cohort,
-        output_data_dir,
-        cores,
-        file.name = "purple_sunrise_beta_gamma.png"
-    ) 
     ## TODO: update me once new plot is ready; right now using Zi plot from skitools
     ## also hacking and just getting rid of the purple sunrise plot to make it work for now
     ## eventually tell CX to update the png we are using on the frontend
@@ -318,6 +314,8 @@ lift_multiplicity_fits <- function(cohort,
         }
 
         for (col in iter_cols) {
+			is_file_found = ! is.null(row[[col]]) && ! is.na(row[[col]]) && file.exists(row[[col]])
+			if (!is_file_found) next
             message(sprintf("Processing %s for %s", col, row$pair))
 
             out_files <- switch(col,
@@ -335,9 +333,9 @@ lift_multiplicity_fits <- function(cohort,
             futile.logger::flog.threshold("ERROR")
             tryCatchLog(
                 {
-                    if (is.null(row[[col]]) || is.na(row[[col]]) || !file.exists(row[[col]])) {
-                        stop(sprintf("Multiplicity file not found for %s: %s is %s", row$pair, col, row[[col]]))
-                    }
+                    # if (! is_file_found) {
+                    #     stop(sprintf("Multiplicity file not found for %s: %s is %s", row$pair, col, row[[col]]))
+                    # }
 
                     mapply(function(out_file, field_to_use) {
                         process_multiplicity_fit(row[[col]],
@@ -474,7 +472,8 @@ lift_coverage_jabba_cn <- function(
     }
 
     # Validate required columns exist
-    required_cols <- c("pair", "jabba_gg", "tumor_coverage")
+	jabba_column = Skilift::DEFAULT_JABBA(object = cohort)
+    required_cols <- c("pair", jabba_column, "tumor_coverage")
     missing_cols <- required_cols[!required_cols %in% names(cohort$inputs)]
     if (length(missing_cols) > 0) {
         stop("Missing required columns in cohort: ", paste(missing_cols, collapse = ", "))
@@ -497,8 +496,8 @@ lift_coverage_jabba_cn <- function(
         futile.logger::flog.threshold("ERROR")
         tryCatchLog(
             {
-                if (!file.exists(row$jabba_gg)) {
-                    print(sprintf("Balanced JaBbA file not found for %s: %s", row$pair, row$jabba_gg))
+                if (!file.exists(row[[jabba_column]])) {
+                    print(sprintf("Balanced JaBbA file not found for %s: %s", row$pair, row[[jabba_column]]))
                     return(NULL)
                 }
 
@@ -508,11 +507,11 @@ lift_coverage_jabba_cn <- function(
                 }
 
                 # Read the gGraph and coverage
-                ggraph <- process_jabba(row$jabba_gg)
+                ggraph <- process_jabba(row[[jabba_column]])
                 cov <- readRDS(row$tumor_coverage)
 
                 if (!any(class(ggraph) == "gGraph")) {
-                    print(sprintf("File is not a gGraph for %s: %s", row$pair, row$jabba_gg))
+                    print(sprintf("File is not a gGraph for %s: %s", row$pair, row[[jabba_column]]))
                     return(NULL)
                 }
 
@@ -736,17 +735,24 @@ lift_purple_sunrise_plot <- function(
                 bestGamma <- 2 * (1 - bestPurity) / (bestPurity * bestPloidy + 2 * (1 - bestPurity))
                 bestBeta <- bestPloidy / (bestPurity * bestPloidy + 2 * (1 - bestPurity))
 
+                range[, color := scales::col_numeric(
+                    palette = scico::scico(256, palette = "batlow"),
+                    domain = range(1 - score, na.rm = TRUE)
+                )(1 - score)]
+
                 # Write the processed data to JSON if save_data is TRUE
                 if (save_data) {
-                    write_json(range[, .(purity, ploidy, score, xmin, xmax, ymin, ymax)], out_file, pretty = TRUE)
+                    write_json(range[, .(purity, ploidy, score, xmin, xmax, ymin, ymax, color)], out_file, pretty = TRUE)
                 }
 
                 p <- create_purity_ploidy_plot(range, bestPloidy, bestPurity, minPurity, maxPurity, minPloidy, maxPloidy, use_geom_rect = TRUE)
                 q <- create_beta_gamma_plot(range, bestBeta, bestGamma)
 
                 if (save_html) {
-                    p_html <- create_purity_ploidy_plot(range, bestPloidy, bestPurity, minPurity, maxPurity, minPloidy, maxPloidy, use_geom_rect = FALSE)
-                    save_purple_sunrise_html(p_html, q, out_file_html)
+                    if (requireNamespace("Cairo", quietly = TRUE)) {
+                        p_html <- create_purity_ploidy_plot(range, bestPloidy, bestPurity, minPurity, maxPurity, minPloidy, maxPloidy, use_geom_rect = FALSE)
+                        save_purple_sunrise_html(p_html, q, out_file_html)
+                    }
                 }
 
                 if (save_pngs) {
@@ -764,8 +770,8 @@ lift_purple_sunrise_plot <- function(
 create_purity_ploidy_plot <- function(purple_purity_range, bestPloidy, bestPurity, minPurity, maxPurity, minPloidy, maxPloidy, use_geom_rect = TRUE) {
     if (use_geom_rect) {
         p <- ggplot(purple_purity_range) +
-            geom_rect(aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = 1- score)) +
-            scale_fill_scico(palette = "batlow", limits = c(0, 1), breaks = c(0, 0.25, 0.5, 0.75, 1), direction = 1, name = "Relative\nScore", guide = "none") +
+            geom_rect(aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = color)) +
+            #scale_fill_scico(palette = "batlow", limits = c(0, 1), breaks = c(0, 0.25, 0.5, 0.75, 1), direction = 1, name = "Relative\nScore", guide = "none") +
             geom_point(aes(x = bestPloidy, y = bestPurity), color = "red", size = 5, shape = 4, stroke = 0.5) +
             geom_segment(aes(x = bestPloidy, xend = bestPloidy, y = minPurity - 0.005, yend = maxPurity + 0.005), color = "red", linetype = "dotted") +
             geom_segment(aes(x = minPloidy, xend = maxPloidy, y = bestPurity, yend = bestPurity), color = "red", linetype = "dotted") +
@@ -777,8 +783,8 @@ create_purity_ploidy_plot <- function(purple_purity_range, bestPloidy, bestPurit
             ylab("Purity")
         } else {
         p <- ggplot(purple_purity_range) +
-            geom_raster(aes(x = ploidy, y = purity, fill = 1- score)) +
-            scale_fill_scico(palette = "batlow", limits = c(0, 1), breaks = c(0, 0.25, 0.5, 0.75, 1), direction = 1, name = "Relative\nScore", guide = "none") +
+            geom_raster(aes(x = ploidy, y = purity, fill = color)) +
+            #scale_fill_scico(palette = "batlow", limits = c(0, 1), breaks = c(0, 0.25, 0.5, 0.75, 1), direction = 1, name = "Relative\nScore", guide = "none") +
             geom_point(aes(x = bestPloidy, y = bestPurity), color = "red", size = 5, shape = 4, stroke = 0.5) +
             geom_segment(aes(x = bestPloidy, xend = bestPloidy, y = minPurity - 0.005, yend = maxPurity + 0.005), color = "red", linetype = "dotted") +
             geom_segment(aes(x = minPloidy, xend = maxPloidy, y = bestPurity, yend = bestPurity), color = "red", linetype = "dotted") +
@@ -958,8 +964,10 @@ lift_pp_plot <- function(cohort, output_data_dir, cores = 1) {
         stop("Input must be a Cohort object")
     }
 
+	jabba_column = Skilift::DEFAULT_JABBA(object = cohort)
+
     # Validate required columns exist
-    required_cols <- c("pair", "jabba_gg", "het_pileups")
+    required_cols <- c("pair", jabba_column, "het_pileups")
 
     missing_cols <- required_cols[!required_cols %in% names(cohort$inputs)]
     if (length(missing_cols) > 0) {
@@ -982,7 +990,7 @@ lift_pp_plot <- function(cohort, output_data_dir, cores = 1) {
         tryCatchLog(
             {
                 pp_plot_list <- create_pp_plot(
-                    jabba_gg = row$jabba_gg,
+                    jabba_gg = row[[jabba_column]],
                     het_pileups = row$het_pileups
                 )
                 pp_plot_data <- pp_plot_list$pp_plot_data

@@ -1,7 +1,25 @@
 #' lift wrapper helper function
 #'
 #' Helper function to check if required columns exist
-has_required_columns <- function(cohort, columns, any = FALSE) {
+has_required_columns <- function(cohort, columns, any = FALSE, verbose = TRUE) {
+#   is_non_allelic_jabba_column = columns %in% Skilift:::priority_columns_jabba
+  is_non_allelic_jabba_column = columns %in% Skilift:::priority_columns_jabba_og
+  ix_non_allelic_jabba_column = which(is_non_allelic_jabba_column)
+  if (any(is_non_allelic_jabba_column)) {
+	replace_column = Skilift::DEFAULT_JABBA(object = cohort)
+	original_column = columns[ix_non_allelic_jabba_column[1]]
+    is_not_same = !identical(replace_column, original_column)
+	if (is_not_same) {
+		if (verbose) {
+            message(
+                "Required jabba column specified: ", original_column, "\n",
+                "Replacement jabba column: ", replace_column
+            )
+        }
+        columns[ix_non_allelic_jabba_column[1]] = replace_column
+	}
+	
+  }	
   if (any) {
     return(any(columns %in% names(cohort$inputs)))
   }
@@ -135,7 +153,7 @@ lift_all <- function(
   message("Uploading in ", cohort$type, " mode")
 
   if (cohort$type == "paired") {
-    lift_paired(
+    cohort_mod = lift_paired(
       cohort = cohort,
       output_data_dir = output_data_dir,
       oncotable_dir = oncotable_dir,
@@ -146,7 +164,7 @@ lift_all <- function(
       ... = ...
     )
   } else if (cohort$type == "heme") {
-    lift_heme(
+    cohort_mod = lift_heme(
       cohort = cohort,
       output_data_dir = output_data_dir,
       oncotable_dir = oncotable_dir,
@@ -157,7 +175,7 @@ lift_all <- function(
       ... = ...
     )
   } else if (cohort$type == "tumor_only") {
-    lift_tumor_only(
+    cohort_mod = lift_tumor_only(
       cohort = cohort,
       output_data_dir = output_data_dir,
       oncotable_dir = oncotable_dir,
@@ -173,6 +191,8 @@ lift_all <- function(
   if (!file.exists(datafiles_json_path)) {
     warning("Creating datafiles.json directory")
   }
+
+  return(cohort_mod)
 }
 
 #' Run MVP (Minimum Viable Product) lift methods
@@ -192,6 +212,8 @@ lift_mvp <- function(
   ...
 ) {
   list2env(list(...), envir = environment())
+
+  jabba_column = Skilift::DEFAULT_JABBA(object = cohort)
 
   if (has_required_columns(cohort, required_columns$total_copy_number_graph)) {
     lift_copy_number_graph(
@@ -227,7 +249,7 @@ lift_mvp <- function(
     )
   }
 
-  if (has_required_columns(cohort, required_columns$oncotable, any = TRUE) && 'jabba_gg' %in% names(cohort$inputs)) {
+  if (has_required_columns(cohort, required_columns$oncotable, any = TRUE) && jabba_column %in% names(cohort$inputs)) {
     cohort <- create_oncotable(
       cohort = cohort,
       outdir = oncotable_dir,
@@ -266,31 +288,6 @@ lift_mvp <- function(
 
   if (has_required_columns(cohort, required_columns$segment_width)) {
     lift_segment_width_distribution(
-      cohort = cohort,
-      output_data_dir = output_data_dir,
-      cores = cores
-    )
-  }
-
-
-  if (has_required_columns(cohort, required_columns$multiplicity_fits)) {
-    lift_multiplicity_fits(
-      cohort = cohort,
-      output_data_dir = output_data_dir,
-      cores = cores
-    )
-  }
-
-  if (has_required_columns(cohort, required_columns$coverage_jabba_cn)) {
-    lift_coverage_jabba_cn(
-      cohort = cohort,
-      output_data_dir = output_data_dir,
-      cores = cores
-    )
-  }
-
-  if (has_required_columns(cohort, required_columns$purple_sunrise_plot)) {
-    lift_purple_sunrise_plot(
       cohort = cohort,
       output_data_dir = output_data_dir,
       cores = cores
@@ -366,11 +363,15 @@ lift_mvp <- function(
     )
   }
 
+  return(cohort)
+
   
 }
 
 lift_tumor_only <- function(cohort, output_data_dir, oncotable_dir, cores, ...) {
   cohort <- lift_mvp(cohort, output_data_dir, oncotable_dir, cores, ...)
+
+  return(cohort)
 }
 
 lift_heme <- function(cohort, output_data_dir, oncotable_dir, cores, ...) {
@@ -383,6 +384,8 @@ lift_heme <- function(cohort, output_data_dir, oncotable_dir, cores, ...) {
   if (has_required_columns(cohort, required_columns$highlighted_events)) {
     warning("not implemented yet")
   }
+
+  return(cohort)
 }
 
 lift_paired <- function(cohort, output_data_dir, oncotable_dir, cores, ...) {
@@ -396,6 +399,8 @@ lift_paired <- function(cohort, output_data_dir, oncotable_dir, cores, ...) {
       is_germline = TRUE
     )
   }
+
+  return(cohort)
 
 }
 

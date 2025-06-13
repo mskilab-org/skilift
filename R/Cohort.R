@@ -1,5 +1,90 @@
 default_settings_path <- system.file("extdata", "test_data", "settings.json", package = "Skilift")
 
+
+priority_columns_jabba_og = c(
+	"events",
+	"balanced_jabba_gg",
+	"jabba_gg"
+)
+
+#' Jabba priority
+#' 
+#' Non-allelic jabbas
+#' @export
+priority_columns_jabba = priority_columns_jabba_og
+
+#' Default Jabba Type 
+#' 
+#' Get correct jabba column to use globally across all methods
+#' 
+#' @export
+DEFAULT_JABBA = function(object, priority_columns_jabba = getOption("skilift_jabba_columns"), get_object = "cohort", test_mode = all, verbose = TRUE) {
+
+	is_priority_columns_jabba_valid = all(priority_columns_jabba %in% Skilift:::priority_columns_jabba_og)
+	if (! is_priority_columns_jabba_valid) {
+		stop(
+			"Provided jabba column names: ", paste(priority_columns_jabba, collapse = ", "), "\n",
+			"These must be one of: ", paste(Skilift:::priority_columns_jabba_og, collapse = ", ")
+		)
+	}
+	
+	if (!is.function(test_mode)) stop("test_mode must be a function, like all() or any()")
+	is_object_not_provided = missing(object) || is.null(object)
+	if (is_object_not_provided) {
+		if (verbose) message("Pulling Cohort object from environment stack")
+		cohort_object = base::dynGet(get_object, ifnotfound = NULL)
+	} else {
+		cohort_object = object
+	}
+	inp = NULL
+	col = priority_columns_jabba[1]
+	use_column = TRUE
+	if (!is.null(cohort_object)) {
+		inp = cohort_object$inputs
+	} else {
+		if (verbose) {
+			message("Cohort object not found!")
+			message("Returning: ", col)
+		}
+		return(col)
+	}
+	for (col in priority_columns_jabba) {
+		Skilift::test_paths(inp[[col]], verbose = FALSE)
+		use_column = test_mode(is_existent_path)
+		if (use_column) break
+	}
+	return(col)
+}
+
+
+#' Default Jabba Type 
+#' 
+#' Get correct jabba column to use globally across all methods
+#' 
+#' @export
+set_jabba_column = function(column) {
+	is_provided_column = (
+		!missing(column) 
+		&& !is.null(column) 
+		&& !(NROW(column) == 1 && Skilift::is_loosely_na(column, other_nas = base::nullfile()))
+	)
+	is_provided_column_valid = is_provided_column && all(column %in% Skilift:::priority_columns_jabba_og)
+	if (is_provided_column && is_provided_column_valid) {
+		message("Setting jabba column to: ", column)
+	} else if (is_provided_column && !is_provided_column_valid) {
+		stop(
+			"Provided jabba column names: ", column, "\n",
+			"These must be one of: ", paste(Skilift:::priority_columns_jabba_og, collapse = ", ")
+		)
+	} else if (!is_provided_column) {
+		column = Skilift:::priority_columns_jabba_og
+		message("Setting default jabba columns to: ", paste(column, collapse = ", "))
+	}
+	Skilift::assign_in_namespace("priority_columns_jabba", column, ns = asNamespace("Skilift"))
+	options("skilift_jabba_columns" = column)
+	return(column)
+}
+
 #' @export
 Cohort <- R6Class("Cohort",
   public = list(
@@ -73,7 +158,7 @@ Cohort <- R6Class("Cohort",
           self$inputs <- private$construct_from_path(x)[]
           self$nextflow_results_path <- x
           warning("Cohort initialized from path: ", x, "\n",
-            "This is deprecated! You should use the gosh-cli to generate an outputs.csv file and then read it in using Cohort$new(path = 'outputs.csv')",)
+            "This is deprecated! You should use the gosh-cli to generate an outputs.csv file and then read it in using Cohort$new(path = 'outputs.csv')")
         }
       } else if (is.data.table(x)) {
         self$inputs <- private$construct_from_datatable(x)[]
@@ -635,8 +720,8 @@ default_col_mapping <- list(
   somatic_snvs = c("somatic_snvs", "snvs_somatic", "sage_somatic_vcf", "strelka_somatic_vcf", "strelka2_somatic_vcf", "somatic_snv", "snv_vcf", "somatic_snv_vcf", "snv_somatic_vcf"),
   somatic_snvs_unfiltered = c("somatic_snvs_unfiltered", "snvs_somatic_unfiltered"),
   germline_snvs = c("germline_snvs", "snvs_germline", "sage_germline_vcf", "germline_snv", "germline_snv_vcf"),
-  fragcounter_normal = c("fragcounter_normal"),
-  fragcounter_tumor = c("fragcounter_tumor"),
+  fragcounter_normal = c("fragcounter_normal", "frag_cov_normal"),
+  fragcounter_tumor = c("fragcounter_tumor", "frag_cov_tumor"),
   segments_cbs = c("cbs_seg_rds", "seg_rds", "cbs_seg"),
   het_pileups = c("het_pileups", "hets", "sites_txt", "hets_sites"),
   multiplicity = c("multiplicity", "somatic_snv_cn", "snv_multiplicity"),
@@ -662,13 +747,20 @@ default_col_mapping <- list(
   hrdetect = c("hrdetect", "hrd"),
   onenesstwoness = c("onenesstwoness","oneness_twoness"),
   oncotable = c("oncotable"),
-  estimate_library_complexity = c("estimate_library_complexity", "qc_dup_rate", "library_complexity_metrics", "est_lib_complex"),
-  alignment_summary_metrics = c("alignment_summary_metrics", "qc_alignment_summary", "alignment_metrics"),
-  insert_size_metrics = c("insert_size_metrics", "qc_insert_size", "insert_metrics"),
+  estimate_library_complexity = c("estimate_library_complexity", "qc_dup_rate", "library_complexity_metrics", "est_lib_complex", "qc_dup_rate_tumor"),
+  estimate_library_complexity_tumor = c("estimate_library_complexity_tumor", "qc_dup_rate_tumor", "library_complexity_metrics_tumor", "est_lib_complex_tumor"),
+  estimate_library_complexity_normal = c("estimate_library_complexity_normal", "qc_dup_rate_normal", "library_complexity_metrics_normal", "est_lib_complex_normal"),
+  alignment_summary_metrics = c("alignment_summary_metrics", "qc_alignment_summary", "alignment_metrics", "qc_alignment_summary_tumor"),
+  alignment_summary_metrics_tumor = c("alignment_summary_metrics_tumor", "qc_alignment_summary_tumor", "alignment_metrics_tumor"),
+  alignment_summary_metrics_normal = c("alignment_summary_metrics_normal", "qc_alignment_summary_normal", "alignment_metrics_normal"),
+  insert_size_metrics = c("insert_size_metrics", "qc_insert_size", "insert_metrics", "insert_size_metrics_tumor"),
+  insert_size_metrics_tumor = c("insert_size_metrics_tumor", "qc_insert_size_tumor", "insert_metrics_tumor"),
+  insert_size_metrics_normal = c("insert_size_metrics_normal", "qc_insert_size_normal", "insert_metrics_normal"),
   wgs_metrics = c("wgs_metrics", "qc_coverage_metrics", "wgs_stats"),
   tumor_wgs_metrics = c("tumor_wgs_metrics", "qc_coverage_metrics_tumor", "tumor_wgs_stats"),
   normal_wgs_metrics = c("normal_wgs_metrics", "qc_coverage_metrics_normal",  "normal_wgs_stats"),
   purple_pp_range = c("purple_pp_range", "purple_range"),
+  purple_qc = c("purple_qc"),
   purple_pp_bestFit = c("purple_pp_bestFit", "purple_pp_best_fit", "purple_bestFit", "purple_solution"),
   msisensorpro = c("msisensorpro", "msisensor_pro", "msisensor_pro_results", "msisensor_results"),
   # Configuration parameters with default values
@@ -1066,362 +1158,4 @@ pairify_cohort_inputs = function(cohort, tumor_status = 1L, normal_status = 0L, 
 		)
 	}
 	return(return_inputs)
-}
-
-#' Cast table
-#' 
-#' Cast using base R.
-#' 
-#' Using base R for robustness and flexibility.
-#' 
-#' @export
-dcastski = function(
-	tbl, 
-	id_columns, 
-	type_columns, 
-	cast_columns, 
-	keep_remaining = FALSE, 
-	sep_cast = "___", 
-	prefix_type = TRUE,
-	drop = FALSE,
-	use_regex = FALSE
-) {
-  if (identical(use_regex, TRUE)) {
-	.NotYetImplemented()
-  }
-  if (base::anyDuplicated(names(tbl)) > 0) {
-    stop("Duplicated names present in table! Dedup first: names(tbl) = base::make.unique(names(tbl))")
-  }
-  remaining_cols = character(0)
-  columns_to_process = unique(c(id_columns, type_columns))
-  if (identical(keep_remaining, TRUE)) {
-    remaining_cols = names(tbl)[!names(tbl) %in% c(columns_to_process, cast_columns)]
-    columns_to_process = c(columns_to_process, remaining_cols)
-  }
-  columns_to_process = c(columns_to_process, cast_columns)
-  ## A very unfortunate circumstance.
-  ## Have to use unique.data.frame due to lists present in cohort inputs
-  ## The data.frame base R method is slow, but works on list elements in columns.
-  ## If tbl is a data.table, skeleton will remain a data.table
-  skeleton = unique.data.frame(
-    base::subset(tbl, select = names(tbl) %in% c(id_columns, remaining_cols))
-  )
-  reduced_tbl = base::subset(tbl, select = names(tbl) %in% columns_to_process)
-  reduced_tbl$types = reduced_tbl[[type_columns[1]]]
-  types = unique(reduced_tbl$types)
-  if (is.factor(reduced_tbl$types) && !identical(drop, TRUE)) {
-    types = base::levels(reduced_tbl$types)
-  }
-  if (length(type_columns) > 1) {
-    .NotYetImplemented()
-    lst = as.list(base::subset(reduced_tbl, select = names(reduced_tbl) %in% type_columns))
-    types = do.call(interaction, lst)
-    skeleton$types = types
-  }
-  for (type in types) {
-    merge_type = reduced_tbl[reduced_tbl$types == type,]
-    merge_type = base::subset(merge_type, select = names(merge_type) %in% c(id_columns, cast_columns))
-    colnms = names(merge_type)
-    names_to_change = colnms[colnms %in% cast_columns]
-	if (prefix_type) {
-		names_to_change = paste(type, names_to_change, sep = sep_cast)
-	} else {
-		names_to_change = paste(names_to_change, type, sep = sep_cast)
-	}
-    
-    colnms[colnms %in% cast_columns] = names_to_change
-    names(merge_type) = colnms
-    skeleton = merge(skeleton, merge_type, by = id_columns, all.x = TRUE)
-  }
-  return(skeleton)
-}
-
-
-#' Melt table
-#' 
-#' Melt using base R.
-#' 
-#' Using base R for robustness and flexibility, not speed necessarily.
-#' Since this will be used primarily for sample/pairs table manipulation.
-#' 
-#' @export
-meltski = function(
-    tbl,
-    id.vars,
-    measure.vars,
-    is_measure_regex = FALSE,
-    variable.name = "variable",
-    value.name = "value",
-    group_regex = "",
-    group_select = "\\1",
-    replacement_regex = "",
-    replacement = "",
-    drop = FALSE,
-    keep_first_variable_col = FALSE,
-    keep_remaining_cols = FALSE,
-    keep_original_cols = FALSE,
-    return_as_data_table = FALSE
-) {
-  keep_first_variable_col = identical(keep_first_variable_col, TRUE)
-  keep_remaining_cols = identical(keep_remaining_cols, TRUE)
-  keep_original_cols = identical(keep_original_cols, TRUE)
-  
-  is_table = is.table(tbl)
-  
-  dimensions = dim(tbl)
-  is_dim_null = is.null(dimensions)
-  dim_NR = NROW(dimensions)
-  is_table_matrix_like = is_table && !is_dim_null && dim_NR == 2
-  is_table_1d = is_table && !is_dim_null && dim_NR == 1
-  is_table_array = is_table && !is_dim_null && dim_NR > 2
-  if (is_table_array) stop("melting more than 2d not supported")
-  if (is_table_1d) {
-    tbl = as.data.frame.matrix(t(as.matrix(tbl)))
-  }
-  if (is_table_matrix_like) {
-    tbl = as.data.frame.matrix(tbl)
-  }
-
-  if (is_table) measure.vars = colnames(tbl)
-
-  is_data_frame = inherits(tbl, "data.frame")
-
-  if (!is_data_frame) stop("Input tbl must be a data.table/data.frame or coercible to a data.frame-like object")
-
-  all_names = names(tbl)
-
-  is_measure_vars_list = is.list(measure.vars)
-  all_measure_vars = measure.vars
-  if (is_measure_vars_list) all_measure_vars = unlist(measure.vars)
-    
-  if (missing(id.vars)) {
-    id.vars = all_names
-    id.vars = id.vars[!id.vars %in% all_measure_vars]
-  }
-  skel = NULL
-  collected_var_names = character(0)
-  if (is_measure_regex) {
-    message("!!WARNING!!: Regex using measure.vars does not guarantee ordered outputs.")
-    message("!!WARNING!!: You must ensure that input columns are ordered with respect to the regex that you provide")
-    message("!!WARNING!!: Otherwise, you should check that your output value columns are not mixed.")
-    message("!!WARNING!!: Attempting to help by sorting column names first.")
-    all_names = sort(all_names)
-  }
-  for (var_i in seq_along(measure.vars)) {
-    var = measure.vars[var_i]
-    if (is_measure_regex) var = grep(var, all_names, value = TRUE)
-    if (is.list(var)) var = unlist(var)
-    tbl_to_rbind = base::subset(tbl, select = c(id.vars, var))
-    if (drop) {
-      is_none_na = base::complete.cases(
-        base::subset(tbl_to_rbind, select = var)
-      )
-      tbl_to_rbind = base::subset(tbl_to_rbind, is_none_na)
-    }
-    nm = names(tbl_to_rbind)
-    for (i in seq_along(var)) {
-      len_value_name = NROW(value.name)
-      if (!(len_value_name > 1 && len_value_name == length(var))) {
-        value_col_name = paste(value.name, "_", i, sep = "")
-      } else {
-        value_col_name = value.name[i]
-      }
-      nm[nm %in% var[i]] = value_col_name
-    }
-    names(tbl_to_rbind) = nm
-    for (i in seq_along(var)) {
-      var.col = paste(variable.name, "_", i, sep = "")
-      tbl_to_rbind[[var.col]] = var[i]
-      collected_var_names = c(collected_var_names, var.col)
-    }    
-    skel = rbind(skel, tbl_to_rbind)
-  }
-  collected_var_names = unique(collected_var_names)
-  if (nzchar(group_regex)) {
-    for (variable in collected_var_names) {
-      skel[[variable]] = gsub(group_regex, group_select, skel[[variable]])
-    }
-  }
-  if (nzchar(replacement_regex)) {
-    for (variable in collected_var_names) {
-      skel[[variable]] = gsub(replacement_regex, replacement, skel[[variable]])
-    }    
-  }
-  remaining_var_names = collected_var_names[-1]
-  remaining_names = names(skel)[!names(skel) %in% remaining_var_names]
-  if (keep_first_variable_col && NROW(remaining_names) > 0) {
-    skel = base::subset(skel, select = remaining_names)
-    names(skel)[names(skel) == collected_var_names[1]] = gsub("_[0-9]+$", "", collected_var_names[1])
-  }
-  is_keep_remaining_flag_on = keep_remaining_cols || keep_original_cols
-  
-  if (is_keep_remaining_flag_on) {
-    is_id_var = all_names %in% id.vars
-    is_selection = rep_len(TRUE, length(all_names))
-    if (!keep_original_cols) {
-      is_selection = all_names %in% id.vars | (!all_names %in% c(all_measure_vars, value.name))
-    }      
-    remaining_tbl = base::subset(tbl, select = is_selection)
-    skel = merge(skel, remaining_tbl, by = id.vars, all.x = TRUE)
-  }
-  return(skel)
-}
-
-
-#' Merge Cohort objects
-#'
-#' Combines two or more Cohort objects into a single Cohort
-#'
-#' @param x Cohort object to merge
-#' @param y Cohort object to merge
-#' @param ... Arbitrary remaining Cohort objects to merge
-#' @param warn_duplicates Logical indicating whether to warn about duplicate pairs (default TRUE)
-#' @param rename_duplicates Logical indicating whether to rename duplicate pairs instead of overwriting (default FALSE)
-#' @return A new Cohort object containing all data from input Cohorts
-#' @export
-merge.Cohort <- function(x, y, ..., warn_duplicates = TRUE, rename_duplicates = FALSE) {
-  cohorts_dots <- list(...)
-  is_x_missing = missing(x)
-  is_y_missing = missing(y)
-  is_x_or_y_missing = is_x_missing || is_y_missing
-  number_cohorts_dots = NROW(cohorts_dots)
-  length_cohorts = sum(as.integer(!is_x_missing), as.integer(!is_y_missing), number_cohorts_dots)
-  # Validate inputs are all Cohorts
-  if (length_cohorts < 2) {
-    stop("At least two Cohort objects must be provided")
-  }
-  if (is_x_or_y_missing) {
-    if (is_x_missing) print("x argument not provided!")
-    if (is_y_missing) print("y argument not provided!")
-    stop("Both x and y must be provided as Cohort objects")
-  }
-  cohorts = c(list(x), list(y), cohorts_dots)
-  for (cohort in cohorts) {
-    if (!inherits(cohort, "Cohort")) {
-      stop("All arguments must be Cohort objects")
-    }
-  }
-
-  # Get first cohort to initialize merged result
-  merged_dt <- data.table::copy(cohorts[[1]]$inputs)
-
-  # Merge remaining cohorts
-  for (i in 2:length(cohorts)) {
-    current_dt <- data.table::copy(cohorts[[i]]$inputs)
-
-    # Check for duplicate pairs
-    duplicate_pairs <- intersect(merged_dt$pair, current_dt$pair)
-    if (length(duplicate_pairs) > 0) {
-      if (warn_duplicates) {
-        warning(sprintf(
-          "Found %d duplicate pair(s): %s",
-          length(duplicate_pairs),
-          paste(duplicate_pairs, collapse = ", ")
-        ))
-      }
-
-      if (rename_duplicates) {
-        # Add incrementing suffix to duplicate pairs
-        for (dup_pair in duplicate_pairs) {
-          suffix <- 1
-          while (paste0(dup_pair, "_", suffix) %in% merged_dt$pair) {
-            suffix <- suffix + 1
-          }
-          current_dt[pair == dup_pair, pair := paste0(pair, "_", suffix)]
-        }
-      } else {
-        # Remove duplicates from current_dt that would overwrite existing pairs
-        current_dt <- current_dt[!pair %in% duplicate_pairs]
-      }
-    }
-
-    # Merge inputs data.tables
-    merged_dt <- merge(
-      merged_dt, 
-      current_dt,
-      by="pair", 
-      all.x = TRUE, ## Need these two on to do outer join, which seems to be expected behavior
-      all.y = TRUE
-    )
-  }
-
-  # Create new Cohort with merged data
-  result <- Cohort$new(merged_dt, cohort_type=cohorts[[1]]$type)
-
-  return(result)
-}
-
-#' Test path
-#' 
-#' Test if path exists robustly
-#' 
-#' @export
-test_path = function(
-  object, 
-  rds_regex = ".rds$",
-  gff_regex = ".gtf(.gz){0,}$|.gff([0-9]){0,}(.gz){0,}$",
-  bcf_regex = ".bcf(.bgz|.gz){0,}$",
-  vcf_regex = ".vcf(.bgz|.gz){0,}$",
-  verbose = TRUE
-) {
-  is_null = is.null(object)
-  is_character = is.character(object)
-  is_len_one = NROW(object) == 1
-  is_not_valid = is_character && ! NROW(object) == 1
-  is_na = is_len_one && (is.na(object) || object %in% c("NA", base::nullfile()))
-  is_possible_path = is_character && is_len_one && !is_na
-  is_existent_path = is_possible_path && file.exists(object)
-  is_rds = is_possible_path && grepl(rds_regex, object)
-  is_vcf = is_possible_path && grepl(vcf_regex, object)
-  is_bcf = is_possible_path && grepl(bcf_regex, object)
-  is_gff = is_possible_path && grepl(gff_regex, object)
-  logicals = as.list(data.frame(
-      is_null,
-      is_character,
-      is_len_one,
-      is_not_valid,
-      is_na,
-      is_possible_path,
-      is_existent_path,
-      is_rds,
-      is_vcf,
-      is_bcf,
-      is_gff
-  ))
-  if (verbose) {
-    nms = names(logicals)
-    message("Assigning:")
-    for (nm in nms) {
-      message(nm)
-    }
-  }
-  list2env(logicals, envir = parent.frame())
-  return(logicals)
-}
-
-#' Read jabba
-#' 
-#' Function to flexibly read in jabba files whether providing raw jabba list or ggraph
-#' 
-#' @export
-process_jabba = function(jabba) {
-  logicals = test_path(jabba, verbose = FALSE)
-  if (is_existent_path && is_rds) {
-    jabba <- readRDS(jabba)
-  } else if (is_existent_path) {
-    stop("Path exists but is not rds": jabba)
-  } else if (is_character && is_len_one) {
-    stop("Path provided does not exist": jabba)
-  } else if (is_not_valid) {
-    stop("Path provided must be a length one string")
-  }
-  is_jabba_list = is.list(jabba) && all(c("segstats", "purity", "ploidy", "junctions") %in% names(jabba))
-  
-  gg = jabba
-  if (is_jabba_list) gg = gG(jabba = jabba)
-  is_jabba_gg = inherits(gg, "gGraph")
-  if (!is_jabba_gg) {
-    stop("jabba must be a gGraph object or jabba like object")
-  }
-  return(gg)
 }

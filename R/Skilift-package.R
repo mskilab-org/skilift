@@ -31,3 +31,37 @@
 #' @useDynLib Skilift, .registration=TRUE
 registerS3method(genname = "merge", class = "data.table", method = data.table::merge.data.table)
 "_PACKAGE"
+
+
+.onLoad = function(libname, pkgname) {
+	skilift_jabba_columns = getOption("skilift_jabba_columns")
+	is_skilift_jabba_columns_option = !is.null(skilift_jabba_columns)
+	is_skilift_jabba_columns_valid_option = (
+		is_skilift_jabba_columns_option && all(skilift_jabba_columns %in% Skilift:::priority_columns_jabba_og)
+	)
+	if (is_skilift_jabba_columns_valid_option) {
+		message("option('skilift_jabba_columns') already set to: ", paste(skilift_jabba_columns, collapse = ", "))
+	} else {
+		message("option('skilift_jabba_columns') set to: ", paste(Skilift:::priority_columns_jabba_og, collapse = ", "))
+		options("skilift_jabba_columns" = Skilift:::priority_columns_jabba_og)
+	}
+	
+}
+
+## Global Variables
+
+#' Paired reads factor 
+#' 
+#' Multiply paired reads by this number for coverage
+#' 
+#' To get binned coverage into base level coverage,
+#' multiply by paired reads factor (2)
+PAIRED_READS_FACTOR = 2
+
+#' Read length
+#' 
+#' Multiply paired reads by this number for read length
+#' 
+#' To get binned coverage into read length level coverage,
+#' multiply by read length (151)
+READ_LENGTH = 151
