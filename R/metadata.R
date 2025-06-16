@@ -1304,15 +1304,16 @@ compute_signature_averages <- function(
     }
 }
 
-#' @name compute_signature_averages
-#' @title Compute Signature Averages
-#' @description
-#' Computes signature averages from various signature files
+#' @name compute_cosine_similarity
+#' @title Compute Cosine Similarities   
+#' @description compute consine similarities between reference and attributed signatures
 #'
-#' @param sig_file Path to signature file
-#' @param sample Sample or pair name needed to subset to the correct sample
+#' @param metadata A data.table containing metadata (must have sigprofiler_sbs_count or sigprofiler_indel_count)
+#' @param probabilities Path to probabilities file
+#' @param matrix_file Path to matrix file
 #' @param is_indel Boolean indicating if processing indel signatures
 #' @param is_deconstruct_sigs Boolean indicating if using deconstructSigs format
+#' @param reference Reference genome name (e.g., "hg19", "hg38")
 #' @return List of signature averages
 compute_cosine_similarity <- function(
     metadata,
@@ -1322,8 +1323,6 @@ compute_cosine_similarity <- function(
     is_deconstruct_sigs = FALSE,
     reference = "hg19"
 ) {
-
-    #browser()
 
     if (reference == "hg19") {
         if (is_indel) {
@@ -1339,13 +1338,11 @@ compute_cosine_similarity <- function(
         }
     }
     
-    weight_reads <- fread(sig_file)
+    weight_reads <- fread(sig_file, fill = TRUE)
     expected_reads <- copy(weight_reads)
 
-    # Set the first row as rownames
     row_names <- expected_reads[[1]]
-    # Remove the first column
-    expected_reads <- expected_reads[,2:ncol(expected_reads)]
+    expected_reads <- expected_reads[, 2:ncol(expected_reads)]
     rownames(expected_reads) <- row_names
     
     ### EXPECTED SIGNATURES ###
@@ -1368,10 +1365,10 @@ compute_cosine_similarity <- function(
     }
 
     ### ATTRIBUTED SIGNATURES ###     
-    probabilities = fread(probabilities)
+    probabilities = fread(probabilities, fill = TRUE)
     prob.matrix <- as.matrix(probabilities[, 3:ncol(probabilities)])
 
-    matrix_file <- fread(matrix_file)
+    matrix_file <- fread(matrix_file, fill = TRUE)
     if (ncol(matrix_file) < 2) {
         stop("matrix_file must have at least two columns")
     }
@@ -1380,7 +1377,7 @@ compute_cosine_similarity <- function(
         stop("Length of multiplier vector must match the number of rows in prob.matrix")
     }
     
-    ### COMPUING COSINE SIMILARITY ###
+    ### COMPUTING COSINE SIMILARITY ###
     weighted_prob_matrix <- prob.matrix
     for (i in 1:ncol(prob.matrix)) {
         weighted_prob_matrix[, i] <- prob.matrix[, i] * multiplier
@@ -1402,7 +1399,6 @@ compute_cosine_similarity <- function(
     # Replace NaN values with 0
     cosine_similarities[is.nan(cosine_similarities)] <- 0
 
-    # Return the weighted matrix for further analysis
     return(list(cosine_similarities = cosine_similarities, 
                 weighted_expected = weighted_expected, 
                 weighted_prob_matrix = weighted_prob_matrix))
@@ -1447,8 +1443,6 @@ add_signatures <- function(
         signatures = list(list())
     )]
 
-    #browser()
-
     if (!is.null(activities_sbs_signatures)) {
         
         signatures <- compute_signature_averages(
@@ -1472,7 +1466,6 @@ add_signatures <- function(
 
             metadata$sigprofiler_sbs_cosine_similarity <- list(as.list(cosine_similarities[["cosine_similarities"]]))
         }
-
     }
 
     if (!is.null(activities_indel_signatures)) {
@@ -1486,6 +1479,7 @@ add_signatures <- function(
         metadata$sigprofiler_indel_count <- list(as.list(deletionInsertion[["indel_count"]]))
 
         if(!is.null(decomposed_indel_signatures) && !is.null(matrix_indel_signatures)) {
+            
             cosine_similarities <- compute_cosine_similarity(
                 metadata = metadata,
                 probabilities = decomposed_indel_signatures,
@@ -1495,10 +1489,7 @@ add_signatures <- function(
             )
 
              metadata$sigprofiler_indel_cosine_similarity <- list(as.list(cosine_similarities[["cosine_similarities"]]))
-
         }
-
-
     }
 
     if (!is.null(deconstructsigs_sbs_signatures)) {
