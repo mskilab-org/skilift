@@ -1332,6 +1332,7 @@ lift_metadata <- function(cohort, output_data_dir, cores = 1, genome_length = c(
                 events = row$events,
                 somatic_snvs = snvs_column,
                 germline_snvs = row$germline_snvs,
+                foreground_col_name = row$denoised_coverage_field,
                 tumor_coverage = row$tumor_coverage,
                 estimate_library_complexity = row$estimate_library_complexity,
                 alignment_summary_metrics = row$alignment_summary_metrics,
@@ -1373,7 +1374,7 @@ lift_metadata <- function(cohort, output_data_dir, cores = 1, genome_length = c(
         })
     }, mc.cores = cores, mc.preschedule = TRUE)
 
-	metadata_tbls = rbindlist(list_metadata)
+	metadata_tbls = rbindlist(list_metadata, fill = TRUE)
 	cohort$inputs = Skilift::merge.repl(cohort$inputs, metadata_tbls, by = "pair", prefer_x = TRUE, prefer_y = FALSE)
 
     # invisible(NULL)
