@@ -8,6 +8,10 @@ create_metadata(
   pair,
   tumor_type = NULL,
   tumor_details = NULL,
+  treatment = NULL,
+  treatment_type = NULL,
+  treatment_best_response = NULL,
+  treatment_duration = NULL,
   disease = NULL,
   primary_site = NULL,
   inferred_sex = NULL,
@@ -46,6 +50,14 @@ create_metadata(
 \item{tumor_type}{The type of tumor.}
 
 \item{tumor_details}{Additional details about the tumor.}
+
+\item{treatment}{The treatment administered.}
+
+\item{treatment_type}{The type of treatment.}
+
+\item{treatment_best_response}{The best response to the treatment.}
+
+\item{treatment_duration}{The duration of the treatment.}
 
 \item{disease}{The disease associated with the sample.}
 

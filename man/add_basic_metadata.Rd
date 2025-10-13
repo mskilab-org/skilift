@@ -8,6 +8,10 @@ add_basic_metadata(
   metadata,
   input_tumor_type,
   input_tumor_details,
+  input_treatment,
+  input_treatment_type,
+  input_treatment_best_response,
+  input_treatment_duration,
   input_disease,
   input_primary_site
 )
@@ -18,6 +22,14 @@ add_basic_metadata(
 \item{tumor_type}{The type of tumor.}
 
 \item{tumor_details}{Additional details of the tumor.}
+
+\item{treatment}{The treatment administered.}
+
+\item{treatment_type}{The type of treatment.}
+
+\item{treatment_best_response}{The best response to the treatment.}
+
+\item{treatment_duration}{The duration of the treatment.}
 
 \item{disease}{The disease associated with the sample.}
 

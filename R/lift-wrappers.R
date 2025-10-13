@@ -65,6 +65,10 @@ has_required_columns <- function(cohort, columns, any = FALSE, verbose = TRUE) {
     metadata = c(
       "tumor_type",
       "tumor_details",
+      "treatment",
+      "treatment_type",
+      "treatment_best_response",
+      "treatment_duration",
       "disease",
       "primary_site",
       "inferred_sex",

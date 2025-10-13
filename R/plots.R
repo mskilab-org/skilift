@@ -1339,6 +1339,10 @@ create_mutations_catalog_json <- function(
 #' @param sage_vcf path to SAGE vcf to get snv count (sage preferred over strelka2)
 #' @param tumor_type_final tumor type abbreviation of the sample
 #' @param tumor_details tumor details of the sample
+#' @param treatment details of the treatment administered
+#' @param treatment_type type of treatment administered
+#' @param treatment_best_response best response to the treatment
+#' @param treatment_duration duration of the treatment
 #' @param disease full length tumor type
 #' @param primary_site primary site of tumor
 #' @param inferred_sex sex of the patient
@@ -1372,6 +1376,10 @@ meta_data_json <- function(
     sage_vcf = NULL,
     tumor_type = NULL,
     tumor_details = NULL,
+    treatment = NULL,
+    treatment_type = NULL,
+    treatment_best_response = NULL,
+    treatment_duration = NULL,
     disease = NULL,
     primary_site = NULL,
     inferred_sex = NULL,
@@ -1417,6 +1425,18 @@ meta_data_json <- function(
     }
     if (!is.null(tumor_details)) {
         meta.dt[, tumor_details := tumor_details]
+    }
+    if (!is.null(treatment)) {
+        meta.dt[, treatment := treatment]
+    }
+    if (!is.null(treatment_type)) {
+        meta.dt[, treatment_type := treatment_type]
+    }
+    if (!is.null(treatment_best_response)) {
+        meta.dt[, treatment_best_response := treatment_best_response]
+    }
+    if (!is.null(treatment_duration)) {
+        meta.dt[, treatment_duration := treatment_duration]
     }
     if (!is.null(disease)) {
         meta.dt[, disease := disease]

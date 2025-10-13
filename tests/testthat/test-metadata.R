@@ -112,6 +112,10 @@ setup({
             inputs[, `:=`(
                 tumor_type = "BRCA",
                 tumor_details = "TNBC",
+                treatment = "Carboplatin",
+                treatment_type = "Chemotherapy",
+                treatment_best_response = "SD",
+                treatment_duration = "62",
                 disease = "Breast Cancer", 
                 primary_site = "Breast",
                 jabba_gg = sapply(sample_files, function(x) x$jabba_gg),
@@ -298,6 +302,10 @@ setup({
         pair = "TEST001",
         tumor_type = "BRCA",
         tumor_details = "TNBC",
+        treatment = "Carboplatin",
+        treatment_type = "Chemotherapy",
+        treatment_best_response = "SD",
+        treatment_duration = "62",
         disease = "Breast Cancer",
         primary_site = "Breast",
         inferred_sex = "female",
@@ -515,7 +523,7 @@ test_that("initialize_metadata_columns creates correct structure", {
     expect_equal(nrow(result), 1)
     
     expected_columns <- c(
-        "pair", "tumor_type", "tumor_details", "disease", "primary_site", "inferred_sex",
+        "pair", "tumor_type", "tumor_details", "treatment", "treatment_type", "treatment_best_response", "treatment_duration", "disease", "primary_site", "inferred_sex",
         "coverage_qc", 
         "snv_count", "snv_count_normal_vaf_greater0",
         "cov_slope", "cov_intercept",
@@ -553,12 +561,20 @@ test_that("add_basic_metadata correctly updates metadata", {
         metadata,
         input_tumor_type = "BRCA",
         input_tumor_details = "TNBC",
+        input_treatment = "Carboplatin",
+        input_treatment_type = "Chemotherapy",
+        input_treatment_best_response = "SD",
+        input_treatment_duration = "62",
         input_disease = "Breast Cancer",
         input_primary_site = "Breast"
     )
     
     expect_equal(result$tumor_type, "BRCA")
     expect_equal(result$tumor_details, "TNBC")
+    expect_equal(result$treatment, "Carboplatin")
+    expect_equal(result$treatment_type, "Chemotherapy")
+    expect_equal(result$treatment_best_response, "SD")
+    expect_equal(result$treatment_duration, "62")
     expect_equal(result$disease, "Breast Cancer")
     expect_equal(result$primary_site, "Breast")
     
@@ -568,12 +584,20 @@ test_that("add_basic_metadata correctly updates metadata", {
         metadata,
         input_tumor_type = "BRCA",
         input_tumor_details = "TNBC",
+        input_treatment = "Carboplatin",
+        input_treatment_type = "Chemotherapy",
+        input_treatment_best_response = "SD",
+        input_treatment_duration = "62",
         input_disease = NULL,
         input_primary_site = "Breast"
     )
     
     expect_equal(result$tumor_type, "BRCA")
     expect_equal(result$tumor_details, "TNBC")
+    expect_equal(result$treatment, "Carboplatin")
+    expect_equal(result$treatment_type, "Chemotherapy")
+    expect_equal(result$treatment_best_response, "SD")
+    expect_equal(result$treatment_duration, "62")
     expect_true(is.na(result$disease))
     expect_equal(result$primary_site, "Breast")
     
@@ -583,12 +607,20 @@ test_that("add_basic_metadata correctly updates metadata", {
         metadata,
         input_tumor_type = NULL,
         input_tumor_details = NULL,
+        input_treatment = NULL,
+        input_treatment_type = NULL,
+        input_treatment_best_response = NULL,
+        input_treatment_duration = NULL,
         input_disease = NULL,
         input_primary_site = NULL
     )
     
     expect_true(is.na(result$tumor_type))
     expect_true(is.na(result$tumor_details))
+    expect_true(is.na(result$treatment))
+    expect_true(is.na(result$treatment_type))
+    expect_true(is.na(result$treatment_best_response))
+    expect_true(is.na(result$treatment_duration))
     expect_true(is.na(result$disease))
     expect_true(is.na(result$primary_site))
 })
@@ -604,6 +636,10 @@ test_that("add_basic_metadata handles invalid inputs", {
             metadata = NULL,
             input_tumor_type = "BRCA",
             input_tumor_details = "TNBC",
+            input_treatment = "Carboplatin",
+            input_treatment_type = "Chemotherapy",
+            input_treatment_best_response = "SD",
+            input_treatment_duration = "62",
             input_disease = "Breast Cancer",
             input_primary_site = "Breast"
         ),
@@ -616,6 +652,10 @@ test_that("add_basic_metadata handles invalid inputs", {
             metadata = list(),
             input_tumor_type = "BRCA",
             input_tumor_details = "TNBC",
+            input_treatment = "Carboplatin",
+            input_treatment_type = "Chemotherapy",
+            input_treatment_best_response = "SD",
+            input_treatment_duration = "62",
             input_disease = "Breast Cancer",
             input_primary_site = "Breast"
         ),
@@ -628,6 +668,10 @@ test_that("add_basic_metadata handles invalid inputs", {
             metadata,
             input_tumor_type = 123,
             input_tumor_details = "TNBC",
+            input_treatment = "Carboplatin",
+            input_treatment_type = "Chemotherapy",
+            input_treatment_best_response = "SD",
+            input_treatment_duration = "62",
             input_disease = "Breast Cancer",
             input_primary_site = "Breast"
         ),
@@ -2458,6 +2502,10 @@ test_that("create_metadata creates complete metadata object", {
         pair = "TEST001",
         tumor_type = "BRCA",
         tumor_details = "TNBC",
+        treatment = "Carboplatin",
+        treatment_type = "Chemotherapy",
+        treatment_best_response = "SD",
+        treatment_duration = "62",
         disease = "Breast Cancer",
         primary_site = "Breast",
         inferred_sex = "female",
@@ -2508,6 +2556,10 @@ test_that("create_metadata handles minimal inputs", {
     # Check that optional fields are NA/NULL
     expect_true(is.na(result$tumor_type))
     expect_true(is.na(result$tumor_details))
+    expect_true(is.na(result$treatment))
+    expect_true(is.na(result$treatment_type))
+    expect_true(is.na(result$treatment_best_response))
+    expect_true(is.na(result$treatment_duration))
     expect_true(is.na(result$disease))
     expect_true(is.na(result$primary_site))
     expect_true(is.na(result$inferred_sex))
@@ -2533,6 +2585,10 @@ test_that("create_metadata handles partial inputs", {
     
     # Check that unprovided inputs are NA/NULL
     expect_true(is.na(result$tumor_details))
+    expect_true(is.na(result$treatment))
+    expect_true(is.na(result$treatment_type))
+    expect_true(is.na(result$treatment_best_response))
+    expect_true(is.na(result$treatment_duration))
     expect_true(is.na(result$disease))
     expect_true(is.na(result$primary_site))
     expect_null(result$coverage_qc[[1]])
@@ -2586,6 +2642,10 @@ test_that("create_metadata handles invalid inputs gracefully", {
         pair = "TEST001",
         tumor_type = 123,  # Should be character
         tumor_details = 123,  # Should be character
+        treatment = TRUE,  # Should be character
+        treatment_type = FALSE,  # Should be character
+        treatment_best_response = 456,  # Should be character
+        treatment_duration = "sixty",  # Should be numeric
         disease = TRUE     # Should be character
     ))
 })
@@ -2668,7 +2728,7 @@ test_that("lift_metadata handles missing optional columns", {
     # Should run with warning but not error
     expect_warning(
         lift_metadata(cohort, temp_dir),
-        "Missing optional columns in cohort: tumor_type, tumor_details, disease, primary_site, inferred_sex, jabba_gg, events, germline_snvs, het_pileups, activities_sbs_signatures, activities_indel_signatures, hrdetect, onenesstwoness, msisensorpro"
+        "Missing optional columns in cohort: tumor_type, tumor_details, treatment, treatment_type, treatment_best_response, treatment_duration, disease, primary_site, inferred_sex, jabba_gg, events, germline_snvs, het_pileups, activities_sbs_signatures, activities_indel_signatures, hrdetect, onenesstwoness, msisensorpro"
     )
     
     # Check that output was still created
@@ -2808,6 +2868,10 @@ test_that("lift_metadata works on real cohort", {
         pair = row$pair,
         tumor_type = row$tumor_type,
         tumor_details = row$tumor_details,
+        treatment = row$treatment,
+        treatment_type = row$treatment_type,
+        treatment_best_response = row$treatment_best_response,
+        treatment_duration = row$treatment_duration,
         disease = row$disease,
         primary_site = row$primary_site,
         inferred_sex = row$inferred_sex,
@@ -2875,6 +2939,10 @@ metadata <- suppressWarnings(create_metadata(
     pair = row$pair,
     tumor_type = row$tumor_type,
     tumor_details = row$tumor_details,
+    treatment = row$treatment,
+    treatment_type = row$treatment_type,
+    treatment_best_response = row$treatment_best_response,
+    treatment_duration = row$treatment_duration,
     disease = row$disease,
     primary_site = row$primary_site,
     inferred_sex = row$inferred_sex,

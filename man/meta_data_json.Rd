@@ -17,6 +17,10 @@ meta_data_json(
   sage_vcf = NULL,
   tumor_type = NULL,
   tumor_details = NULL,
+  treatment = NULL,
+  treatment_type = NULL,
+  treatment_best_response = NULL,
+  treatment_duration = NULL,
   disease = NULL,
   primary_site = NULL,
   inferred_sex = NULL,
@@ -52,6 +56,14 @@ meta_data_json(
 \item{sage_vcf}{path to SAGE vcf to get snv count (sage preferred over strelka2)}
 
 \item{tumor_details}{additional details about the tumor}
+
+\item{treatment}{The treatment administered.}
+
+\item{treatment_type}{The type of treatment.}
+
+\item{treatment_best_response}{The best response to the treatment.}
+
+\item{treatment_duration}{The duration of the treatment.}
 
 \item{disease}{full length tumor type}
 

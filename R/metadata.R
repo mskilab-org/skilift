@@ -23,6 +23,10 @@ initialize_metadata_columns <- function(pair) {
         pair = pair,
         tumor_type = NA_character_,
         tumor_details = NA_character_,
+        treatment = NA_character_,
+        treatment_type = NA_character_,
+        treatment_best_response = NA_character_,
+        treatment_duration = NA_integer_,
         disease = NA_character_,
         primary_site = NA_character_,
         inferred_sex = NA_character_,
@@ -66,6 +70,10 @@ initialize_metadata_columns <- function(pair) {
 #' @param metadata A data.table containing metadata.
 #' @param tumor_type The type of tumor.
 #' @param tumor_details Details about the tumor.
+#' @param treatment The treatment administered to the patient.
+#' @param treatment_type The type of treatment administered.
+#' @param treatment_best_response The best response to the treatment.
+#' @param treatment_duration The duration of the treatment.
 #' @param disease The disease associated with the sample.
 #' @param primary_site The primary site of the tumor.
 #' @return Updated metadata with basic information added.
@@ -73,6 +81,10 @@ add_basic_metadata <- function(
     metadata,
     input_tumor_type,
     input_tumor_details,
+    input_treatment,
+    input_treatment_type,
+    input_treatment_best_response,
+    input_treatment_duration,
     input_disease,
     input_primary_site
 ) {
@@ -98,6 +110,38 @@ add_basic_metadata <- function(
             stop("tumor_details must be NULL or a character string")
         }
         metadata[, tumor_details := input_tumor_details]
+    }
+
+    # Validate treatment if provided
+    if (!is.null(input_treatment)) {
+        if (!is.character(input_treatment)) {
+            stop("treatment must be NULL or a character string")
+        }
+        metadata[, treatment := input_treatment]
+    }
+
+    # Validate treatment_type if provided
+    if (!is.null(input_treatment_type)) {
+        if (!is.character(input_treatment_type)) {
+            stop("treatment_type must be NULL or a character string")
+        }
+        metadata[, treatment_type := input_treatment_type]
+    }
+
+    # Validate treatment_best_response if provided
+    if (!is.null(input_treatment_best_response)) {
+        if (!is.character(input_treatment_best_response)) {
+            stop("treatment_best_response must be NULL or a character string")
+        }
+        metadata[, treatment_best_response := input_treatment_best_response]
+    }
+
+    # Validate treatment_duration if provided
+    if (!is.null(input_treatment_duration)) {
+        if (!is.integer(input_treatment_duration)) {
+            stop("treatment_duration must be NULL or an integer")
+        }
+        metadata[, treatment_duration := input_treatment_duration]
     }
 
     # Validate disease if provided
@@ -1459,6 +1503,10 @@ add_msisensor_score <- function(metadata, msisensorpro) {
 #' @param pair The sample pair identifier.
 #' @param tumor_type The type of tumor.
 #' @param tumor_details Details about the tumor.
+#' @param treatment The treatment administered to the patient.
+#' @param treatment_type The type of treatment administered.
+#' @param treatment_best_response The best response to treatment.
+#' @param treatment_duration The duration of treatment.
 #' @param disease The disease associated with the sample.
 #' @param primary_site The primary site of the tumor.
 #' @param inferred_sex The inferred sex of the sample.
@@ -1488,6 +1536,10 @@ create_metadata <- function(
     pair,
     tumor_type = NULL,
     tumor_details = NULL,
+    treatment = NULL,
+    treatment_type = NULL,
+    treatment_best_response = NULL,
+    treatment_duration = NULL,
     disease = NULL, 
     primary_site = NULL,
     inferred_sex = NULL,
@@ -1524,7 +1576,7 @@ create_metadata <- function(
     # Initialize metadata with all possible columns
     metadata <- initialize_metadata_columns(pair)
     # change NA to NULL
-    fix_entries = c("tumor_type", "tumor_details", "disease", "primary_site", "inferred_sex", "jabba_gg", "events", "somatic_snvs", "germline_snvs", "tumor_coverage", "estimate_library_complexity", "alignment_summary_metrics", "insert_size_metrics", "wgs_metrics", "het_pileups", "activities_indel_signatures", "deconstructsigs_sbs_signatures", "activities_sbs_signatures", "hrdetect", "onenesstwoness", "msisensorpro", "denoised_coverage_field", "summary", "conpair_contamination")
+    fix_entries = c("tumor_type", "tumor_details", "treatment", "treatment_type", "treatment_best_response", "treatment_duration", "disease", "primary_site", "inferred_sex", "jabba_gg", "events", "somatic_snvs", "germline_snvs", "tumor_coverage", "estimate_library_complexity", "alignment_summary_metrics", "insert_size_metrics", "wgs_metrics", "het_pileups", "activities_indel_signatures", "deconstructsigs_sbs_signatures", "activities_sbs_signatures", "hrdetect", "onenesstwoness", "msisensorpro", "denoised_coverage_field", "summary", "conpair_contamination")
     for (x in fix_entries) {
         if (!exists(x) || is.null(get(x)) || is.na(get(x))) {
             assign(x, NULL)
@@ -1532,7 +1584,7 @@ create_metadata <- function(
     }    
 
     # Add each component sequentially
-    metadata <- add_basic_metadata(metadata, tumor_type, tumor_details, disease, primary_site)
+    metadata <- add_basic_metadata(metadata, tumor_type, tumor_details, treatment, treatment_type, treatment_best_response, treatment_duration, disease, primary_site)
     metadata <- add_sex_information(metadata, inferred_sex, jabba_gg, tumor_coverage)
     # Add coverage metrics
     metadata <- add_coverage_metrics(
@@ -1611,7 +1663,7 @@ lift_metadata <- function(cohort, output_data_dir, cores = 1, genome_length = c(
     jabba_column = Skilift::DEFAULT_JABBA(object = cohort)
     # Define all possible columns
     all_cols <- c(
-        "pair", "tumor_type", "tumor_details", "disease", "primary_site", "inferred_sex",
+        "pair", "tumor_type", "tumor_details", "treatment", "treatment_type", "treatment_best_response", "treatment_duration", "disease", "primary_site", "inferred_sex",
         # "jabba_gg", 
 		jabba_column,
 		"events", "oncokb_snv", "somatic_snvs", "germline_snvs", "tumor_coverage",
@@ -1684,6 +1736,10 @@ lift_metadata <- function(cohort, output_data_dir, cores = 1, genome_length = c(
                 pair = row$pair,
                 tumor_type = row$tumor_type,
                 tumor_details = row$tumor_details,
+                treatment = row$treatment,
+                treatment_type = row$treatment_type,
+                treatment_best_response = row$treatment_best_response,
+                treatment_duration = row$treatment_duration,
                 disease = row$disease,
                 primary_site = row$primary_site,
                 inferred_sex = inferred_sex_field,
