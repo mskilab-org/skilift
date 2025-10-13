@@ -7,9 +7,11 @@
 create_metadata(
   pair,
   tumor_type = NULL,
+  tumor_details = NULL,
   disease = NULL,
   primary_site = NULL,
   inferred_sex = NULL,
+  purple_pp_bestFit = NULL,
   jabba_gg = NULL,
   events = NULL,
   somatic_snvs = NULL,
@@ -30,16 +32,20 @@ create_metadata(
   msisensorpro = NULL,
   genome = "hg19",
   seqnames_loh = c(1:22),
+  seqnames_autosomes = c(1:22),
   seqnames_genome_width_or_genome_length = c(1:22, "X", "Y"),
   denoised_coverage_field = "foreground",
   is_visible = TRUE,
-  summary = NULL
+  summary = NULL,
+  cohort_type = NULL
 )
 }
 \arguments{
 \item{pair}{The sample pair identifier.}
 
 \item{tumor_type}{The type of tumor.}
+
+\item{tumor_details}{Additional details about the tumor.}
 
 \item{disease}{The disease associated with the sample.}
 

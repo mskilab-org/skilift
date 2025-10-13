@@ -119,14 +119,13 @@ Cohort <- R6Class("Cohort",
                           settings = Skilift:::default_settings_path,
                           col_mapping = NULL,
                           path_patterns = Skilift::nf_path_patterns,
-                          cohort_type = "paired") {
+                          cohort_type = "paired",
+                          gs4_auth_path = NULL,
+                          merge_tumor_type_db = TRUE,
+                          params_json_path = NULL,
+                          ...
+                          ) {
       self$reference_name <- reference_name
-
-      default_cohort_types <- c("paired", "heme", "tumor_only")
-      if (!cohort_type %in% default_cohort_types) {
-        stop("cohort_type must be one of: ", paste(default_cohort_types, collapse = ", "))
-      }
-      self$type <- cohort_type
 
       # Merge user-provided mapping with default mapping
       default_col_mapping <- Skilift::default_col_mapping
@@ -151,24 +150,171 @@ Cohort <- R6Class("Cohort",
 
       self$cohort_cols_to_x_cols <- default_col_mapping
 
-      if (is.character(x) && length(x) == 1) {
-        if (grepl("\\.csv$", x)) {
-          self$inputs <- private$construct_from_datatable(data.table(read.csv(x, colClasses = c("patient_id" = "character", "pair" = "character", "patient" = "character"))))[]
-        } else {
-          self$inputs <- private$construct_from_path(x)[]
-          self$nextflow_results_path <- x
-          warning("Cohort initialized from path: ", x, "\n",
-            "This is deprecated! You should use the gosh-cli to generate an outputs.csv file and then read it in using Cohort$new(path = 'outputs.csv')")
+      is_potential_path = is.character(x) && length(x) == 1 && !all(is.na(x))
+      is_dir = is_potential_path && dir.exists(x)
+      is_output_csv_present_in_dir = is_dir && file.exists(file.path(x, "outputs.csv"))
+      is_output_csv_present = is_potential_path && all(grepl("\\.csv$", x)) && file.exists(x)
+      is_output_csv_provided = is_output_csv_present_in_dir || is_output_csv_present
+      is_tabular = inherits(x, "data.frame")
+      path_to_outputs_csv = NULL
+
+      if (is_output_csv_provided) {
+        if (is_output_csv_present_in_dir) {
+          path_to_outputs_csv = file.path(x, "outputs.csv")
+        } else if (is_output_csv_present) {
+          path_to_outputs_csv = x
         }
-      } else if (is.data.table(x)) {
+        dt = data.table(read.csv(path_to_outputs_csv, colClasses = c("patient_id" = "character", "pair" = "character", "patient" = "character")))
+        self$inputs <- private$construct_from_datatable(dt)[]
+      } else if (is_tabular) {
         self$inputs <- private$construct_from_datatable(x)[]
+      } else if (is_dir) {
+        self$inputs <- private$construct_from_path(x)[]
+        self$nextflow_results_path <- x
+        warning("Cohort initialized from path: ", x, "\n",
+          "This is deprecated! You should use the gosh-cli to generate an outputs.csv file and then read it in using Cohort$new(path = 'outputs.csv')")
       } else {
         stop("Input must be either a path (character) or data.table")
       }
 
+      
+      is_null_params = is.null(params_json_path)
+      if (is_output_csv_provided && is_null_params) {
+        fls = list.files(dirname(path_to_outputs_csv), full.names = TRUE)
+        params_json_path_query = grep("params.*\\.json", fls, value = TRUE)
+        nr = NROW(params_json_path_query)
+        if (nr > 0) {
+          params_json_path = params_json_path_query[1]
+          if (nr > 1) message("More than one params JSON found in outputs.csv directory - using the first one: ", params_json_path)
+        } else if (nr < 1) {
+          message("No params.json path found") ## params_json_path stays NULL
+        }
+      }
+
+      params_list = list()
+      
+      is_null_params = is.null(params_json_path)
+      is_params_present = (
+        !is_null_params 
+        && is.character(params_json_path) 
+        && NROW(params_json_path) == 1 
+        && all(!is.na(params_json_path)) 
+        && all(file.exists(params_json_path))
+      )
+
+      if (is_params_present) {
+        params_list = jsonlite::fromJSON(params_json_path)
+      }
+
+      default_cohort_types <- c("paired", "heme", "tumor_only")
+      if (!cohort_type %in% default_cohort_types) {
+        stop("cohort_type must be one of: ", paste(default_cohort_types, collapse = ", "))
+      }
+
+      ## Default cohort_type is "paired"
+      if (identical(params_list$is_heme, TRUE)) {
+        if (!identical(cohort_type, "heme")) {
+          message("Run type determined to be heme from params.json - overriding cohort_type to 'heme'")
+        }
+        cohort_type = "heme"
+      } else if (identical(params_list$tumor_only, TRUE)) {
+        if (!identical(cohort_type, "tumor_only")) {
+          message("Run type determined to be tumor_only from params.json - overriding cohort_type to 'tumor_only'")
+        }
+        cohort_type = "tumor_only"
+      }
+
+      self$type <- cohort_type
+
+
+      
+
+    ## Service account json
+
+    merge_tumor_type = function(self) {
+      gs4_auth_path_opt = getOption("gs4_auth_path")
+      is_present_opt = !is.null(gs4_auth_path_opt)
+      gs4_auth_path_env = Sys.getenv("GS4_AUTH_PATH")
+      is_present_env = !(identical(gs4_auth_path_env, "") || identical(gs4_auth_path_env, character(0)))
+      gs4_auth_path_arg = gs4_auth_path
+      is_present_arg = (
+        is.character(gs4_auth_path_arg) 
+        && NROW(gs4_auth_path_arg) == 1 
+        && all(!is.na(gs4_auth_path_arg)) 
+        && file.exists(gs4_auth_path_arg)
+      )
+        tumor_type_db = NULL
+      proceed_with_tumor_type_mapping = is_present_opt || is_present_env || is_present_arg
+      if (proceed_with_tumor_type_mapping) {
+        watchmaker_sequencing_tumor_types = "https://docs.google.com/spreadsheets/d/18BKzuuMS50X6jTAqJv1nAJPOWlp0Jn_jHQUx3wN4M4k/edit?usp=sharing"
+        if (is_present_env) gs4_auth_path = gs4_auth_path_env
+        if (is_present_opt) gs4_auth_path = gs4_auth_path_opt
+        if (is_present_arg) gs4_auth_path = gs4_auth_path_arg
+        googlesheets4::gs4_auth(path = gs4_auth_path)
+        tumor_type_db = tryCatch(
+          {
+            googlesheets4::read_sheet(watchmaker_sequencing_tumor_types, "Samples")
+          },
+          error = function(e) {
+            message("Could not authenticate with googlesheets4 using provided service account - will not match tumor type to internal DB")
+            # message("Error: ", e$message)
+            return(NULL)
+          }
+        )
+        tumor_type_db = data.table::as.data.table(tumor_type_db)
+      } else {
+        
+        message("No googlesheets4 authentication method provided - will not match tumor type to internal DB")
+        message("googlesheets4 authentication can be provided as flag to Skilift$Cohort$new(..., gs4_auth_path='/path/to/google-cloud-service-account.json') or via `options(gs4_auth_path = '/path/to/google-cloud-service-account.json')` or read in as an environment variable `GS4_AUTH_PATH=/path/to/google-cloud-service-account.json')`")
+      }
+      # googlesheets4::gs4_auth(path = "~/.secrets/solar-semiotics-469520-b8-ae032496e3f0.json")
+
+        if (!is.null(tumor_type_db)) {
+          tumor_type_db$tumor_sample = tumor_type_db$Tumor_WG_Number
+          otumor_sample = gsub(
+            "___.*", "", 
+            self$inputs$tumor_sample
+          )
+          otumor_sample = gsub("(WG-[0-9]+-[0-9]+)[[:punct:]]+.*", "\\1", otumor_sample, perl = TRUE)
+          self$inputs$otumor_sample = otumor_sample
+          self$inputs = Skilift::merge.repl(
+            self$inputs,
+            # tumor_type_db[, .(tumor_sample = Tumor_WG_Number, tumor_type = Tumor_Type, tumor_group = Tumor_Group)]
+            tumor_type_db
+            ,
+            prefer_y = TRUE,
+            by.x = "otumor_sample",
+            by.y = "tumor_sample",
+            allow.cartesian = TRUE
+          )
+          self$inputs$tumor_type = self$inputs$Tumor_Type
+      }
+      return(self)
+    }
+
+    if (merge_tumor_type_db) {
+      self = merge_tumor_type(self)
+    }
+    
+
+      # if (is.character(x) && length(x) == 1) {
+      #   if (grepl("\\.csv$", x)) {
+      #     self$inputs <- private$construct_from_datatable(data.table(read.csv(x, colClasses = c("patient_id" = "character", "pair" = "character", "patient" = "character"))))[]
+      #   } else {
+      #     self$inputs <- private$construct_from_path(x)[]
+      #     self$nextflow_results_path <- x
+      #     warning("Cohort initialized from path: ", x, "\n",
+      #       "This is deprecated! You should use the gosh-cli to generate an outputs.csv file and then read it in using Cohort$new(path = 'outputs.csv')")
+      #   }
+      # } else if (is.data.table(x)) {
+      #   self$inputs <- private$construct_from_datatable(x)[]
+      # } else {
+      #   stop("Input must be either a path (character) or data.table")
+      # }
+
       inp = self$inputs
       dm = dim(inp)
-      has_dimensions = !is.null(dm)
+      has_dimensions = !is.null(dm) && !identical(c(0L, 0L), dim(data.table()))
       jx = integer()
       if (has_dimensions) jx = seq_len(NCOL(inp))
       for (j in jx) {
@@ -203,7 +349,7 @@ Cohort <- R6Class("Cohort",
       )
 
       # Define metadata fields and configuration parameter fields that should only check for NA/NULL
-      metadata_fields <- c("tumor_type", "disease", "primary_site", "inferred_sex", "metadata_is_visible")
+      metadata_fields <- c("tumor_type", "tumor_details", "disease", "primary_site", "inferred_sex", "metadata_is_visible")
       config_fields <- Skilift:::config_parameter_names # Use the existing config parameter names
 
       # Combine metadata and config fields
@@ -274,7 +420,7 @@ Cohort <- R6Class("Cohort",
 
       id_to_parse = "pair"
       if (is_castable) {
-          sample_metadata = Skilift::dcastski(sample_metadata, id_columns = c("pair", "tumor_type", "disease", "primary_site", "inferred_sex", "pair_original"), type_columns = "sample_type", cast_columns = c("sample", "bam"), sep = "_")
+          sample_metadata = Skilift::dcastski(sample_metadata, id_columns = c("pair", "tumor_type", "tumor_details", "disease", "primary_site", "inferred_sex", "pair_original"), type_columns = "sample_type", cast_columns = c("sample", "bam"), sep = "_")
       }
 
       if (is_paired) {
@@ -432,6 +578,7 @@ Cohort <- R6Class("Cohort",
       #   status = samplesheet$status,
       #   sex = samplesheet$sex,
       #   tumor_type = samplesheet$tumor_type,
+      #   tumor_details = samplesheet$tumor_details,
       #   disease = samplesheet$disease,
       #   primary_site = samplesheet$primary_site
       # )
@@ -468,7 +615,7 @@ Cohort <- R6Class("Cohort",
 
       # Read samplesheet and extract metadata
       samplesheet <- fread(samplesheet_path, colClasses = c("patient" = "character"))
-      metacols = c("patient", "sample", "tumor_type", "status", "disease", "primary_site", "sex", "bam")
+      metacols = c("patient", "sample", "tumor_type", "status", "tumor_details", "disease", "primary_site", "sex", "bam")
       metavars = base::mget(
         metacols, 
         as.environment(as.list(samplesheet)),
@@ -482,6 +629,7 @@ Cohort <- R6Class("Cohort",
         sample = metavars$sample,
         tumor_type = metavars$tumor_type,
         status = metavars$status,
+        tumor_details = metavars$tumor_details,
         disease = metavars$disease,
         primary_site = metavars$primary_site,
         inferred_sex = metavars$sex,
@@ -723,20 +871,25 @@ nf_path_patterns <- list(
 default_col_mapping <- list(
   pair = c("patient_id", "pair", "pair_id", "sample"),
   tumor_type = c("tumor_type", "status"),
+  tumor_sample = c("tumor_sample"),
+  normal_sample = c("normal_sample"),
+  tumor_details = c("tumor_details"),
   disease = c("disease"),
   primary_site = c("primary_site"),
   inferred_sex = c("inferred_sex", "sex"),
   tumor_bam = c("tumor_bam", "bam_tumor"),
   normal_bam = c("normal_bam", "bam_normal"),
   structural_variants = c("structural_variants", "gridss_somatic", "gridss_sv", "svaba_sv", "sv", "svs", "vcf"),
+  structural_variants_retiered = c("structural_variants_retiered"),
   structural_variants_unfiltered = "structural_variants_unfiltered",
+  structural_variants_raw = "structural_variants_raw",
   tumor_coverage = c("tumor_coverage", "coverage_tumor", "dryclean_tumor", "tumor_dryclean_cov", "dryclean_cov"),
   somatic_snvs = c("somatic_snvs", "snvs_somatic", "sage_somatic_vcf", "strelka_somatic_vcf", "strelka2_somatic_vcf", "somatic_snv", "snv_vcf", "somatic_snv_vcf", "snv_somatic_vcf"),
   somatic_snvs_unfiltered = c("somatic_snvs_unfiltered", "snvs_somatic_unfiltered"),
   germline_snvs = c("germline_snvs", "snvs_germline", "sage_germline_vcf", "germline_snv", "germline_snv_vcf"),
   fragcounter_normal = c("fragcounter_normal", "frag_cov_normal"),
   fragcounter_tumor = c("fragcounter_tumor", "frag_cov_tumor"),
-  segments_cbs = c("cbs_seg_rds", "seg_rds", "cbs_seg"),
+  segments_cbs = c("cbs_seg_rds", "seg_rds", "cbs_seg", "seg"),
   het_pileups = c("het_pileups", "hets", "sites_txt", "hets_sites"),
   multiplicity = c("multiplicity", "somatic_snv_cn", "snv_multiplicity"),
   germline_multiplicity = c("germline_multiplicity", "multiplicity_germline", "germline_snv_cn"),
@@ -746,6 +899,8 @@ default_col_mapping <- list(
   oncokb_snv = c("oncokb_snv", "oncokb_maf", "maf"),
   oncokb_cna = c("oncokb_cna", "cna"),
   oncokb_fusions = c("oncokb_fusions", "oncokb_fusion", "fusion_maf"),
+  itdseek_vcf = c("itdseek_vcf"),
+  itdseek_rds = c("itdseek_rds"),
   jabba_gg = c("jabba_gg", "jabba_simple", "jabba_rds", "jabba_simple_gg"),
   karyograph = c("karyograph"),
   balanced_jabba_gg = c("balanced_jabba_gg", "jabba_gg_balanced", "non_integer_balance", "balanced_gg", "ni_balanced_gg"),
@@ -781,7 +936,10 @@ default_col_mapping <- list(
   purple_pp_range = c("purple_pp_range", "purple_range"),
   purple_qc = c("purple_qc"),
   purple_pp_bestFit = c("purple_pp_bestFit", "purple_pp_best_fit", "purple_bestFit", "purple_solution"),
+  purple_pp_bestFit_revised = c("purple_pp_best_fit_revised"),
   msisensorpro = c("msisensorpro", "msisensor_pro", "msisensor_pro_results", "msisensor_results"),
+  conpair_concordance = c("conpair_concordance"),
+  conpair_contamination = c("conpair_contamination"),
   # Configuration parameters with default values
   metadata_is_visible = structure(c("metadata_is_visible"), default = TRUE),
   copy_number_graph_max_cn = structure(c("copy_number_graph_max_cn"), default = 100),
@@ -993,11 +1151,12 @@ cohort_attributes <- c(
       
   }
   # obj_out$inputs = tbli
-  suppressWarnings({
+  suppressMessages(suppressWarnings({
     obj_out <- Skilift::Cohort$new(
-      x = data.table()
+      x = data.table(),
+      merge_tumor_type_db = FALSE
     )
-  })
+  }))
   attributes_to_copy <- Skilift:::cohort_attributes
   attributes_to_copy <- attributes_to_copy[!attributes_to_copy %in% "inputs"]
   for (attribute in attributes_to_copy) {

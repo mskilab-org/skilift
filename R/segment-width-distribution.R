@@ -57,10 +57,16 @@ get_segstats <- function(
     # signal_mutl = sum(signal * cov_w, na.rm = T)
     # mcols(cov)[[coverage_field]] = as.numeric(signal * (cov_sw / signal_mutl))
 
+
   if (is.character(balanced_jabba_gg)) {
     balanced_jabba_gg = process_jabba(balanced_jabba_gg)
   }
-  balanced_gg_gr <- balanced_jabba_gg$nodes$gr
+  is_granges = inherits(balanced_jabba_gg, "GRanges")
+  is_gg = inherits(balanced_jabba_gg, "R6")
+  if (is_granges) balanced_gg_gr = balanced_jabba_gg
+  if (is_gg) balanced_gg_gr = balanced_jabba_gg$nodes$gr
+  is_invalid = !is_granges && !is_gg
+  if (is_invalid) stop("get_segstats input invalid, needs to be segment GRanges or gGraph")
     segstats <- JaBbA:::segstats(
         balanced_gg_gr,
         cov,
@@ -106,7 +112,7 @@ lift_segment_width_distribution <- function(
     }
 
     # Validate required columns exist
-	jabba_column = Skilift::DEFAULT_JABBA(object = cohort)
+    jabba_column = Skilift::DEFAULT_JABBA(object = cohort)
     required_cols <- c("pair", jabba_column, "tumor_coverage")
     missing_cols <- required_cols[!required_cols %in% names(cohort$inputs)]
     if (length(missing_cols) > 0) {
@@ -142,7 +148,11 @@ lift_segment_width_distribution <- function(
                 }
 
                 # Get sequence lengths from the gGraph
-                seq_lengths <- seqlengths(ggraph$nodes$gr)
+                ## seq_lengths <- seqlengths(ggraph$nodes$gr)
+                seq_lengths = seqlengths(GenomeInfoDb::keepStandardChromosomes(ggraph$nodes$gr, pruning.mode = "coarse"))
+                
+                seq_lengths = seq_lengths[!names(seq_lengths) %in% c("Y", "chry", "chrY", "24", "MT", "chrmt", "chrM", "chrm", "X", "chrX", "23")]
+
 
                 # Check for required fields
                 colnames_check <- c(
@@ -162,7 +172,8 @@ lift_segment_width_distribution <- function(
                     # Get segstats information
                     segstats.dt <- get_segstats(
                         balanced_jabba_gg = row[[jabba_column]],
-                        tumor_coverage = row$tumor_coverage
+                        tumor_coverage = row$tumor_coverage,
+                        coverage_field = row$denoised_coverage_field
                     )
                     segstats.gr <- GRanges(segstats.dt, seqlengths = seq_lengths) %>% trim()
                     gg_w_segstats <- gG(nodes = segstats.gr, edges = ggraph$edges$dt)
@@ -182,7 +193,8 @@ lift_segment_width_distribution <- function(
                 annotations = if (!is.null(annotations)) unlist(annotations) else NULL
 
                 # Create JSON
-                gGnome::refresh(ggraph.reduced)$json(
+                ggout = gGnome::refresh(ggraph.reduced)
+                ggout$json(
                     filename = out_file,
                     verbose = TRUE,
                     annotations = annotations,
@@ -214,13 +226,14 @@ lift_allelic_pp_fit <- function(cohort,
                                 cores = 1,
                                 save_png = TRUE,
                                 save_data = TRUE, 
+                                binwidth = 1e4,
                                 file.name = "hetsnps_major_minor.png") {
     if (!inherits(cohort, "Cohort")) {
         stop("Input must be a Cohort object")
     }
 
     # Validate required columns exist
-	jabba_column = Skilift::DEFAULT_JABBA(object = cohort)
+    jabba_column = Skilift::DEFAULT_JABBA(object = cohort)
     required_cols <- c("pair", jabba_column, "het_pileups")
     missing_cols <- required_cols[!required_cols %in% names(cohort$inputs)]
 
@@ -247,7 +260,7 @@ lift_allelic_pp_fit <- function(cohort,
                         hets.fname = row$het_pileups,
                         allele = TRUE,
                         scatter = TRUE,
-                        binwidth = 1e4,
+                        binwidth = binwidth,
                         save = FALSE,
                         field = "count",
                         verbose = T) 
@@ -313,8 +326,8 @@ lift_multiplicity_fits <- function(cohort,
         }
 
         for (col in iter_cols) {
-			is_file_found = ! is.null(row[[col]]) && ! is.na(row[[col]]) && file.exists(row[[col]])
-			if (!is_file_found) next
+            is_file_found = ! is.null(row[[col]]) && ! is.na(row[[col]]) && file.exists(row[[col]])
+            if (!is_file_found) next
             message(sprintf("Processing %s for %s", col, row$pair))
 
             out_files <- switch(col,
@@ -356,6 +369,8 @@ lift_multiplicity_fits <- function(cohort,
             )
         }
     }, mc.cores = cores, mc.preschedule = TRUE)
+
+    return(invisible(NULL))
 }
 
 
@@ -471,7 +486,7 @@ lift_coverage_jabba_cn <- function(
     }
 
     # Validate required columns exist
-	jabba_column = Skilift::DEFAULT_JABBA(object = cohort)
+    jabba_column = Skilift::DEFAULT_JABBA(object = cohort)
     required_cols <- c("pair", jabba_column, "tumor_coverage")
     missing_cols <- required_cols[!required_cols %in% names(cohort$inputs)]
     if (length(missing_cols) > 0) {
@@ -519,7 +534,18 @@ lift_coverage_jabba_cn <- function(
 
                 # Prepare data for plotting
                 tiles.gr <- gUtils::gr.tile(gUtils::si2gr(si = seq_lengths), width = width)
-                tiles.gr <- tiles.gr %$% cov[, c("foreground", "input.read.counts")] %$% ggraph$nodes$gr[, c("cn")]
+                
+                if("input.read.counts" %in% colnames(mcols(cov))) { #temp fix for hmf- this was hardcoded before
+                  tiles.gr <- tiles.gr %$% cov[, c("foreground", "input.read.counts")] %$% ggraph$nodes$gr[, c("cn")] #hard coded line
+                } else {
+                  tiles.gr <- tiles.gr %$% cov[, c(row$denoised_coverage_field, "reads")] %$% ggraph$nodes$gr[, c("cn")]
+                }
+                
+                if(row$denoised_coverage_field != "foreground") {
+                  ##just rename as temporary fix - we need the raw field to cohort$inputs so we're not hardcoding these fields
+                  tiles.gr$foreground = mcols(tiles.gr)[[row$denoised_coverage_field]]
+                  tiles.gr$input.read.counts = tiles.gr$reads
+                }
 
                 if (mask) {
                     suppressWarnings({
@@ -674,6 +700,7 @@ lift_purple_sunrise_plot <- function(
     # Validate required columns exist
     required_cols <- c("pair", "purple_pp_range", "purple_pp_bestFit")
     if (!all(required_cols %in% names(cohort$inputs))) {
+        missing_cols = required_cols[!required_cols %in% names(cohort$inputs)]
         stop("Missing required columns in cohort: ", paste(missing_cols, collapse = ", "))
     }
 
@@ -734,17 +761,24 @@ lift_purple_sunrise_plot <- function(
                 bestGamma <- 2 * (1 - bestPurity) / (bestPurity * bestPloidy + 2 * (1 - bestPurity))
                 bestBeta <- bestPloidy / (bestPurity * bestPloidy + 2 * (1 - bestPurity))
 
+                range[, color := scales::col_numeric(
+                    palette = scico::scico(256, palette = "batlow"),
+                    domain = range(1 - score, na.rm = TRUE)
+                )(1 - score)]
+
                 # Write the processed data to JSON if save_data is TRUE
                 if (save_data) {
-                    write_json(range[, .(purity, ploidy, score, xmin, xmax, ymin, ymax)], out_file, pretty = TRUE)
+                    write_json(range[, .(purity, ploidy, score, xmin, xmax, ymin, ymax, color)], out_file, pretty = TRUE)
                 }
 
                 p <- create_purity_ploidy_plot(range, bestPloidy, bestPurity, minPurity, maxPurity, minPloidy, maxPloidy, use_geom_rect = TRUE)
                 q <- create_beta_gamma_plot(range, bestBeta, bestGamma)
 
                 if (save_html) {
-                    p_html <- create_purity_ploidy_plot(range, bestPloidy, bestPurity, minPurity, maxPurity, minPloidy, maxPloidy, use_geom_rect = FALSE)
-                    save_purple_sunrise_html(p_html, q, out_file_html)
+                    if (requireNamespace("Cairo", quietly = TRUE)) {
+                        p_html <- create_purity_ploidy_plot(range, bestPloidy, bestPurity, minPurity, maxPurity, minPloidy, maxPloidy, use_geom_rect = FALSE)
+                        save_purple_sunrise_html(p_html, q, out_file_html)
+                    }
                 }
 
                 if (save_pngs) {
@@ -762,8 +796,8 @@ lift_purple_sunrise_plot <- function(
 create_purity_ploidy_plot <- function(purple_purity_range, bestPloidy, bestPurity, minPurity, maxPurity, minPloidy, maxPloidy, use_geom_rect = TRUE) {
     if (use_geom_rect) {
         p <- ggplot(purple_purity_range) +
-            geom_rect(aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = 1- score)) +
-            scale_fill_scico(palette = "batlow", limits = c(0, 1), breaks = c(0, 0.25, 0.5, 0.75, 1), direction = 1, name = "Relative\nScore", guide = "none") +
+            geom_rect(aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = color)) +
+            #scale_fill_scico(palette = "batlow", limits = c(0, 1), breaks = c(0, 0.25, 0.5, 0.75, 1), direction = 1, name = "Relative\nScore", guide = "none") +
             geom_point(aes(x = bestPloidy, y = bestPurity), color = "red", size = 5, shape = 4, stroke = 0.5) +
             geom_segment(aes(x = bestPloidy, xend = bestPloidy, y = minPurity - 0.005, yend = maxPurity + 0.005), color = "red", linetype = "dotted") +
             geom_segment(aes(x = minPloidy, xend = maxPloidy, y = bestPurity, yend = bestPurity), color = "red", linetype = "dotted") +
@@ -775,8 +809,8 @@ create_purity_ploidy_plot <- function(purple_purity_range, bestPloidy, bestPurit
             ylab("Purity")
         } else {
         p <- ggplot(purple_purity_range) +
-            geom_raster(aes(x = ploidy, y = purity, fill = 1- score)) +
-            scale_fill_scico(palette = "batlow", limits = c(0, 1), breaks = c(0, 0.25, 0.5, 0.75, 1), direction = 1, name = "Relative\nScore", guide = "none") +
+            geom_raster(aes(x = ploidy, y = purity, fill = color)) +
+            #scale_fill_scico(palette = "batlow", limits = c(0, 1), breaks = c(0, 0.25, 0.5, 0.75, 1), direction = 1, name = "Relative\nScore", guide = "none") +
             geom_point(aes(x = bestPloidy, y = bestPurity), color = "red", size = 5, shape = 4, stroke = 0.5) +
             geom_segment(aes(x = bestPloidy, xend = bestPloidy, y = minPurity - 0.005, yend = maxPurity + 0.005), color = "red", linetype = "dotted") +
             geom_segment(aes(x = minPloidy, xend = maxPloidy, y = bestPurity, yend = bestPurity), color = "red", linetype = "dotted") +
@@ -956,7 +990,7 @@ lift_pp_plot <- function(cohort, output_data_dir, cores = 1) {
         stop("Input must be a Cohort object")
     }
 
-	jabba_column = Skilift::DEFAULT_JABBA(object = cohort)
+    jabba_column = Skilift::DEFAULT_JABBA(object = cohort)
 
     # Validate required columns exist
     required_cols <- c("pair", jabba_column, "het_pileups")
@@ -1235,37 +1269,44 @@ pp_plot = function(jabba_rds = NULL,
 
   } else {
 
-    if (scatter) {
 
+    if (scatter) {
       dt = cbind(as.data.table(major.tiles)[, .(seqnames, start, end, major.cn = cn)],
                  as.data.table(minor.tiles)[, .(minor.cn = cn, jabba_cn = jabba_cn)])
       dt = dt[major.cn < maxval & minor.cn < maxval &
-              major.cn > minval & minor.cn > minval &
-              grepl("[0-9]", seqnames)==TRUE,]
+                major.cn > minval & minor.cn > minval &
+                grepl("[0-9]", seqnames)==TRUE,]
 
-    # Add a 'color' column with hex codes using ggplot2's default hue palette
-    dt[, color := scales::hue_pal()(length(unique(jabba_cn)))[match(jabba_cn, sort(unique(jabba_cn)))]]
 
-      pt = ggplot(dt, aes(x = major.cn, y = minor.cn, color = factor(jabba_cn))) +
-        geom_point(size = 2, alpha = 0.1) +
+      # Add a 'color' column with hex codes using Tableau10 color palette
+      tableau10 <- c("#4E79A7", "#F28E2B", "#E15759", "#76B7B2", "#59A14F",
+                   "#EDC948", "#B07AA1", "#FF9DA7", "#9C755F", "#BAB0AC")
+      dt[, color := { u <- sort(unique(jabba_cn));
+        setNames(tableau10[((seq_along(u) - 1) %% length(tableau10)) + 1], u)[as.character(jabba_cn)] }]
+      dt <- dt[seqnames %in% c(1:22, "X", "Y")]
+    
+    pt = ggplot(dt, aes(x = major.cn, y = minor.cn, group = jabba_cn, fill = color, color = color)) +
+        #stat_density_2d(geom = "polygon", alpha = 0.7, color = "white") +
+        geom_point(size = 1, alpha = 0.2) +
+        scale_fill_identity() +
         scale_x_continuous(breaks = 0:floor(maxval),
                            labels = as.character(0:floor(maxval)),
-                           sec.axis = sec_axis(trans = ~(. - eqn["intercept"])/eqn["slope"],
+                           sec.axis = sec_axis(~ (. - eqn["intercept"]) / eqn["slope"],
                                                name = paste("Major", field))) +
         scale_y_continuous(breaks = 0:floor(maxval),
                            labels = as.character(0:floor(maxval)),
-                           sec.axis = sec_axis(trans = ~(. - eqn["intercept"])/eqn["slope"],
+                           sec.axis = sec_axis(~ (. - eqn["intercept"]) / eqn["slope"],
                                                name = paste("Minor", field))) +
-        labs(x = "Major CN", y = "Minor CN", color = "JaBbA CN") +
+        labs(x = "Major CN", y = "Minor CN", fill = "Group Color", color = "Group Color") +
         theme_bw() +
         theme(legend.position = "none",
               axis.title = element_text(size = 20, family = "sans"),
               axis.text.x = element_text(size = 20, family = "sans"),
               axis.text.y = element_text(size = 14, family = "sans"))
-
-      pt = ggExtra::ggMarginal(pt, type = "histogram",
-                               xparams = list(bins = bins),
-                               yparams = list(bins = bins))
+              
+    pt = ggExtra::ggMarginal(pt, type = "histogram",
+                             xparams = list(bins = bins),
+                             yparams = list(bins = bins))
       
     } else {
 
@@ -1312,4 +1353,225 @@ pp_plot = function(jabba_rds = NULL,
         data = dt,
         eqn = eqn
     ))
+}
+
+
+#' 2D QC Purity Ploidy Plot
+#'
+#' Create scatter plot of copy number fits
+#'
+#' Data comes from multiplicity
+#' @author Kevin Hadi
+#' @author Aditya Deshpande
+#' @export
+create_2d_purity_ploidy = function(
+    cohorttuple, mask = TRUE,
+    mask_gr = system.file("extdata", "data", "maskA_re.rds", package = "Skilift"),
+    subsample_per_group = 1000,
+    datadir
+) {
+    row = cohorttuple
+    multiplicity_hets = readRDS(row$hetsnps_multiplicity)
+    multiplicity_somatic = readRDS(row$multiplicity)
+    dt_hets = gr2dt(multiplicity_hets)
+    dt_somatic = gr2dt(multiplicity_somatic)
+
+    variants = rbind(
+        data.table::copy(dt_hets)[, mult_cn := major_snv_copies][, origin := "major"],
+        data.table::copy(dt_hets)[, mult_cn := minor_snv_copies][, origin := "minor"],
+        data.table::copy(dt_somatic)[, mult_cn := total_snv_copies][, origin := "somatic"],
+        fill = TRUE
+    )
+
+    variants <- variants[(!is.na(cn))]
+    variants$cn <- round(variants$cn, 0)
+    if (mask) {
+        mask_gr = readRDS(mask_gr)
+        variants$masked = dt2gr(variants) %^% mask_gr
+        variants = variants[!variants$masked %in% TRUE]
+    }
+
+
+    dat = variants[, .(cn, mult_cn, origin)]
+    dat_sub = {
+        set.seed(42);
+        dat[, {
+        byfun = function(.SD) {
+            out = .SD
+            if (NROW(.SD) > subsample_per_group) 
+                out = .SD[sample(seq_len(NROW(.SD)), size = subsample_per_group, replace = FALSE)]
+            return(out)
+        }
+        byfun(.SD)
+        },
+        by = origin
+    ]
+    }
+
+    min_cn= min(dat_sub[origin == "somatic"]$mult_cn, na.rm = TRUE)
+    min_cn_het = min(dat_sub[!origin == "somatic"]$mult_cn, na.rm = TRUE)
+
+    dat_sub[signif(mult_cn, 3) == signif(min(dat_sub$mult_cn), 3), cn]
+    min_cn = min(
+        min(dat_sub$cn, na.rm = TRUE),
+        min(dat_sub$mult_cn, na.rm = TRUE),
+        na.rm = TRUE
+    )
+    max_cn = max(
+        max(dat_sub$cn, na.rm = TRUE),
+        max(dat_sub$mult_cn, na.rm = TRUE),
+        na.rm = TRUE
+    )
+    cn_range = seq(floor(min_cn), ceiling(max_cn))
+    ## cn_range = 0:cn_max_limit
+
+    nr_cn_range = NROW(cn_range)
+
+    dat_sub$fcn = factor(dat_sub$cn)
+
+    set.seed(10)
+    dat_sub$jitter_cn = jitter(dat_sub$cn)
+    dat_sub$jitter_mult_cn = jitter(dat_sub$mult_cn)
+
+    dat_sub_somatic = data.table::copy(dat_sub[origin == "somatic"])[,grouping := cn][]
+    
+    dat_sub_somatic[["Copy Number"]] = factor(
+        dat_sub_somatic$grouping,
+        levels = cn_range
+    )
+
+    minmax = function(x) {
+        vec = (x - min(x, na.rm = TRUE))
+        range = max(x, na.rm = TRUE) - min(x, na.rm = TRUE)
+        vec / range
+    }
+    
+    ramp = grDevices::colorRamp(c("purple", "black"))
+    colmat = ramp(seq(from = 0, to = 1, length.out = 25 + nr_cn_range))
+    cols = rgb(colmat, maxColorValue = 255)
+    purples = cols[seq_len(nr_cn_range)]
+
+
+
+    ## purples  <- RColorBrewer::brewer.pal(9, "Purples")[seq(to = NROW(cn_range) + 3, length.out = NROW(cn_range))]   # y progressively darker purples
+    somatic_palette = purples
+    names(somatic_palette) = cn_range
+
+    sp_somatic <- ggpubr::ggscatter(dat_sub_somatic, x = "jitter_cn", y = "jitter_mult_cn",
+        color = "Copy Number", palette = somatic_palette,
+        drop = FALSE,
+        size = 1, alpha = 0.2, ellipse = TRUE, mean.point = TRUE) +
+        ggpubr::border() +
+        ggplot2::xlab("Segment CN") +
+        ggplot2::ylab("Somatic CN")
+
+    majors = paste("Maj", cn_range) 
+
+    minors = paste("Min", cn_range) 
+
+    dat_sub_hets = data.table::copy(dat_sub[!origin == "somatic"])[,grouping := interaction(ifelse(origin == "major", "Maj", "Min"), cn, sep = " ")][]
+    dat_sub_hets[["Allelic CN"]] = factor(dat_sub_hets$grouping, levels = c(majors, minors))
+
+    ramp = grDevices::colorRamp(c("red", "black"))
+    colmat = ramp(seq(from = 0, to = 1, length.out = 25 + nr_cn_range))
+    cols = rgb(colmat, maxColorValue = 255)
+    reds = cols[seq_len(nr_cn_range)]
+
+    
+    ramp = grDevices::colorRamp(c("blue", "black"))
+    colmat = ramp(seq(from = 0, to = 1, length.out = 25 + nr_cn_range))
+    cols = rgb(colmat, maxColorValue = 255)
+    blues = cols[seq_len(nr_cn_range)]
+
+
+    hets_palette <- c(reds, blues)
+    names(hets_palette) = c(majors, minors)
+
+    sp_hets <- ggpubr::ggscatter(dat_sub_hets, x = "jitter_cn", y = "jitter_mult_cn",
+        color = "Allelic CN", palette = hets_palette,
+        drop = FALSE,
+        size = 1, alpha = 0.2, ellipse = TRUE, mean.point = TRUE) +
+        ggpubr::border() +
+        ggplot2::xlab("Segment CN") +
+        ggplot2::ylab("Allelic CN")
+
+
+    theme_integer_grid <- function() {
+        ggplot2::theme_minimal(base_size = 24) +
+        ggplot2::theme(
+            panel.grid.major = element_line(color = "grey80"),
+            panel.grid.minor = element_blank(),      
+            )
+    }
+    xy_lim = c(min(cn_range), max(cn_range))
+    pg = cowplot::plot_grid(
+        sp_somatic
+        + theme_integer_grid()
+        + ggplot2::scale_x_continuous(breaks = scales::breaks_width(1))
+        + ggplot2::scale_y_continuous(breaks = scales::breaks_width(1))
+        + ggplot2::coord_cartesian(xlim = xy_lim,ylim = xy_lim)
+    ,
+        sp_hets
+        + theme_integer_grid()
+        + ggplot2::scale_x_continuous(breaks = scales::breaks_width(1))
+        + ggplot2::scale_y_continuous(breaks = scales::breaks_width(1))
+        + ggplot2::coord_cartesian(xlim = xy_lim, ylim = xy_lim)
+    ,
+        ncol = 2, align = "hv"
+
+    )
+    return(
+        list(
+            cowplot_obj = pg,
+            data_somatic = dat_sub_somatic,
+            data_hets = dat_sub_hets
+        )
+    )
+}
+
+#' Lift 2d purity ploidy
+#' 
+#' Lift 2d purity ploidy
+#' @author Kevin Hadi
+#' @author Aditya Deshpande
+#' @export 
+lift_2d_purity_ploidy_plot <- function(cohort, output_data_dir, cores = 1) {
+    if (!inherits(cohort, "Cohort")) {
+        stop("Input must be a Cohort object")
+    }
+
+    jabba_column = Skilift::DEFAULT_JABBA(object = cohort)
+
+    # Validate required columns exist
+    required_cols <- c("pair", "multiplicity", "hetsnps_multiplicity")
+
+    missing_cols <- required_cols[!required_cols %in% names(cohort$inputs)]
+    if (length(missing_cols) > 0) {
+        stop("Missing required columns in cohort: ", paste(missing_cols, collapse = ", "))
+    }
+    iterate_function = function(row, output_data_dir) {
+        futile.logger::flog.threshold("ERROR")
+        tryCatchLog(
+            {
+                nr = NROW(row)
+                if (is.numeric(row) && identical(nr, 1L)) {
+                    row = cohort$inputs[row, ]
+                }
+                pair = row$pair
+                filename = file.path(output_data_dir, row$pair, "multiplicity.png")
+                res_list = create_2d_purity_ploidy(row)
+                pg = res_list$cowplot_obj
+                grDevices::png(filename, height = 1000, width = 2000, pointsize = 12)
+                print(pg)
+                grDevices::dev.off()
+                return(invisible(NULL))
+            }, error = function(e) {
+                print(sprintf("Error processing %s: %s", row$pair, e$message))
+            }
+        )
+    }
+    nr = NROW(cohort$inputs)
+    ix = seq_len(nr)
+    mclapply(ix, iterate_function, mc.cores = cores, mc.preschedule = TRUE, output_data_dir = output_data_dir)
+    return(invisible(NULL))
 }

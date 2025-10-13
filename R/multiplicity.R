@@ -52,6 +52,10 @@ annotate_multihit = function(oncokb_mult) { ## oncokb multiplicity merged output
 		]
 	)
 
+  setkey(oncokb_pc_hits, I)
+
+
+
 	oncokb_mult$num_protein_coding_hits_per_gene = oncokb_pc_hits$num_protein_coding_hits
 
 
@@ -84,6 +88,7 @@ annotate_multihit = function(oncokb_mult) { ## oncokb multiplicity merged output
 		),
 		by = Hugo_Symbol]
 	)
+  setkey(oncokb_multi_hits, I)
 
 
 	oncokb_mult$is_multi_hit_per_gene = oncokb_multi_hits$is_multi_hit_per_gene
@@ -324,7 +329,7 @@ create_multiplicity <- function(snv_cn, oncokb_snv=NULL, is_germline = FALSE, fi
 		## Process mutations
 		setnames(mutations.dt, old = "VAF", new = "vaf", skip_absent = TRUE)
 		mutations.dt <- mutations.dt[!is.na(get(field)), ]
-		mutations.dt[start == end, end := end + 1]
+		# mutations.dt[start == end, end := end + 1]
 		mutations.dt[, vaf := round(vaf, 3)] ## round for frontend legibility
 
 		## FIXME: dealing with the left join issue from merge_oncokb_multiplicity.
@@ -419,7 +424,7 @@ multiplicity_to_intervals <- function(
     node_metadata = NULL,
     reference_name = "hg19",
     cohort_type,
-	subsample_size = 1e4
+	subsample_size = 1e3
 ) {
     # Load chromosome lengths from settings
     settings_data <- jsonlite::fromJSON(settings)
@@ -499,15 +504,31 @@ multiplicity_to_intervals <- function(
 		# transcripts_plus_prom = GenomicRanges::resize(transcripts, width = width(transcripts) + 1000, fix = "end")
 		prom = GenomicRanges::flank(transcripts, width = 1000, start = TRUE)
 		is_in_query = (gr %^% prom | gr$snpeff_annotation %in% snpeff_protein_coding_annotations)
+		ix_in_query = which(is_in_query)
+		nr_in_query = NROW(ix_in_query)
+		any_in_query = nr_in_query > 0
 		if (is_cohort_heme) {
 			message("Filtering multiplicity to heme relevant genes")
 			hemedb = readRDS(Skilift:::HEMEDB())
 			gene_query = hemedb$GENE
 			is_in_query = is_in_query & gr$gene %in% gene_query
+			ix_in_query = which(is_in_query)
+			nr_in_query = NROW(ix_in_query)
 		}
 
-        gr_in_query = gr[is_in_query]
-        gr_other = gr[!is_in_query]
+		if (nr_in_query > subsample_size) {
+			set.seed(42)
+			ix_in_query = sample(ix_in_query, size = subsample_size, replace = FALSE)
+			ix_in_query = sort(ix_in_query)
+		}
+
+        # gr_in_query = gr[is_in_query]
+		gr_in_query = gr[ix_in_query]
+		gr_other = gr
+		if (any_in_query) {
+			gr_other = gr[-ix_in_query]
+		}
+        
 		
         remaining = subsample_size - NROW(gr_in_query)
 		is_other_more_than_remaining = NROW(gr_other) > remaining

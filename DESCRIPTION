@@ -50,7 +50,9 @@ Imports:
     pandoc,
     ggExtra,
 	scales,
-	rlang
+	rlang,
+    googlesheets4,
+    ggpubr
 License: GPL-2
 BugReports: http://github.com/mskilab-org/skilift/issues
 Encoding: UTF-8

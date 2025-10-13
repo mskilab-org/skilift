@@ -22,6 +22,7 @@ initialize_metadata_columns <- function(pair) {
         # Basic metadata
         pair = pair,
         tumor_type = NA_character_,
+        tumor_details = NA_character_,
         disease = NA_character_,
         primary_site = NA_character_,
         inferred_sex = NA_character_,
@@ -49,7 +50,10 @@ initialize_metadata_columns <- function(pair) {
         b1_2 = NA_real_,
         b1 = NA_real_,
         b2 = NA_real_,
-        tmb = NA_real_  # Add this line
+        tmb = NA_real_,  # Add this line
+
+        conpair_contamination = NA_real_,
+        conpair_concordance = NA_real_
     )
     return(dt)
 }
@@ -57,16 +61,18 @@ initialize_metadata_columns <- function(pair) {
 #' @name add_basic_metadata
 #' @title Add Basic Metadata
 #' @description
-#' Adds basic metadata information such as tumor type, disease, and primary site.
+#' Adds basic metadata information such as tumor type, tumor details, disease, and primary site.
 #'
 #' @param metadata A data.table containing metadata.
 #' @param tumor_type The type of tumor.
+#' @param tumor_details Details about the tumor.
 #' @param disease The disease associated with the sample.
 #' @param primary_site The primary site of the tumor.
 #' @return Updated metadata with basic information added.
 add_basic_metadata <- function(
     metadata,
     input_tumor_type,
+    input_tumor_details,
     input_disease,
     input_primary_site
 ) {
@@ -85,7 +91,15 @@ add_basic_metadata <- function(
         }
         metadata[, tumor_type := input_tumor_type]
     }
-    
+
+    # Validate tumor_details if provided
+    if (!is.null(input_tumor_details)) {
+        if (!is.character(input_tumor_details)) {
+            stop("tumor_details must be NULL or a character string")
+        }
+        metadata[, tumor_details := input_tumor_details]
+    }
+
     # Validate disease if provided
     if (!is.null(input_disease)) {
         if (!is.character(input_disease)) {
@@ -189,15 +203,34 @@ extract_metrics <- function(qc_data, metrics, pair) {
     # Verify all metrics exist in data
     missing_cols <- setdiff(metrics, names(qc_data))
     if (length(missing_cols) > 0) {
-        stop(sprintf("Missing columns in QC data: %s", paste(missing_cols, collapse = ", ")))
+        message(sprintf("Missing columns in QC data: %s", paste(missing_cols, collapse = ", ")), "\nSetting to NA")
     }
-    
+
     # Select and rename columns
-    result <- qc_data[, metrics, with = FALSE]
-    setnames(result, old = metrics, new = names(metrics))
-    
+    # result <- qc_data[, metrics, with = FALSE]
+    # setnames(result, old = metrics, new = names(metrics))
+
+    qc_data = as.list(qc_data)
+    result = data.table(pair = pair)
+
+    ix = seq_along(metrics)
+    for (i in ix) {
+        metric = metrics[i]
+        is_metric_present = exists(metric, qc_data)
+        val = NA_real_
+        if (!is_metric_present) {
+            ## result[[names(metrics)[metrics == metric]]] = NA_real_
+            result = cbind(result, "rename___col___" = val)
+            ## next
+        }
+        val = qc_data[[metric]]
+        result = cbind(result, "rename___col___" = val)
+        names(result)[names(result) == "rename___col___"] = names(metric)
+        ## result[[names(metrics)[metrics == metric]]] = qc_data[[metric]]
+    }
+        
     # Add pair identifier
-    result[, pair := pair]
+    # result[, pair := pair]
     
     return(result)
 }
@@ -219,6 +252,7 @@ process_qc_metrics <- function(
     normal_wgs_metrics,
     pair
 ) {
+
 
     # Define metric mappings for each file type
     complexity_metrics_cols <- c(
@@ -286,12 +320,12 @@ process_qc_metrics <- function(
     insert_data = data.table(pair = character(0))
     if (test_file_is_present(insert_size_metrics)) {
         insert_data <- extract_metrics(
-            fread(insert_size_metrics),
+            fread(insert_size_metrics)[PAIR_ORIENTATION == "FR"],
             insert_metrics_cols,
             pair
         )
     }
-    
+
     tumor_wgs_data = data.table(pair = character(0))
     if (test_file_is_present(tumor_wgs_metrics)) {
         tumor_wgs_data <- extract_metrics(
@@ -379,6 +413,300 @@ process_qc_metrics <- function(
     return(as.list(qc_metrics))
 }
 
+
+list_of_qc = list(
+    dup_rate = "estimate_library_complexity",
+    tumor_cov = "tumor_wgs_metrics",
+    normal_cov = "normal_wgs_metrics",
+    insert_size = "insert_size_metrics",
+    alignment_summary = "alignment_summary_metrics"
+)
+
+#' QC Metrics
+#' 
+#' Process QC metrics
+#'
+#' @param estimate_library_complexity Path to the estimate_library_complexity_metrics file
+#' @param alignment_summary_metrics Path to the alignment_summary_metrics file
+#' @param insert_size_metrics Path to the insert_size_metrics file
+#' @param wgs_metrics Path to the wgs_metrics file
+#' @param pair Sample pair identifier
+#' @return A list containing processed QC metrics
+process_qc_metrics2 <- function(
+    estimate_library_complexity,
+    alignment_summary_metrics,
+    insert_size_metrics,
+    tumor_wgs_metrics,
+    normal_wgs_metrics,
+    pair
+) {
+
+    # coalesce_cols = function(cohorttuple, cols) {
+    #     lst = list()
+    #     for (col in cols) {
+    #         if (!exists(col, as.list(cohorttuple))) next
+    #         lst = c(lst, list(cohorttuple[[col]]))
+    #     }
+    #     coalesced = do.call(
+    #         Skilift:::coalesce,
+    #         lst            
+    #     )
+    #     return(coalesced)
+    # }
+
+    # dup_path = coalesce_cols(cohorttuple, c(list_of_qc$dup_rate))
+    # cov_tumor_path = coalesce_cols(cohorttuple, c(list_of_qc$tumor_cov))
+    # cov_normal_path = coalesce_cols(cohorttuple, c(list_of_qc$normal_cov))
+    # insert_path = coalesce_cols(cohorttuple, c(list_of_qc$insert_size))
+    # aln_path = coalesce_cols(cohorttuple, c(list_of_qc$alignment_summary))
+    # pair = cohorttuple$pair
+
+    test_file_is_present = function(x) {
+        (
+            !is.null(x)
+            && is.character(x)
+            && NROW(x) == 1
+            && file.exists(x)
+        )
+    }
+
+    get_metrics = function(path, cols, pair = "pair") {
+        nr = NROW(path)
+        is_character = is.character(path)
+        is_any_na = any(is.na(path))
+        is_invalid = is_character && (! nr == 1 || is_any_na)
+        if (is_invalid) stop(path, ": invalid path!")
+        if (!test_file_is_present(path)) return(data.table::data.table(pair = pair))
+        fcon = file(path, "r")
+        txt = character(0)
+        l = readLines(fcon, 1)
+        is_comment = startsWith(l, "#")
+        nr = NROW(l)
+        is_empty = nr == 0 || !nzchar(l)
+        while (is_comment && !is_empty) {
+            l = readLines(fcon, 1)
+            nr = NROW(l)
+            is_empty = nr == 0 || !nzchar(l)
+            is_comment = startsWith(l, "#")
+        }
+        txt = c(txt, l)
+        while (!is_comment && !is_empty) {
+            l = readLines(fcon, 1)
+            txt = c(txt, l)
+            nr = NROW(l)
+            is_empty = nr == 0 || !nzchar(l)
+            is_comment = startsWith(l, "#")
+        }
+        tbl = setDT(read.table(text = txt, header = TRUE, sep = "\t"))
+        extract_metrics(qc_data = tbl, metrics = cols, pair = pair)
+    }
+
+    subset_which = function(obj, ix) {
+        nr = NROW(ix)
+        if (nr == 0) return(obj) else return(obj[ix])
+    }
+
+
+    # Define metric mappings for each file type
+    complexity_metrics_cols <- c(
+        read_pairs_examined = "READ_PAIRS_EXAMINED",
+        read_pair_duplicates = "READ_PAIR_DUPLICATES",
+        read_pair_optical_duplicates = "READ_PAIR_OPTICAL_DUPLICATES",
+        percent_duplication = "PERCENT_DUPLICATION"
+    )
+    
+    alignment_metrics_cols <- c(
+        CATEGORY = "CATEGORY",
+        total_reads = "TOTAL_READS",
+        pf_reads_aligned = "PF_READS_ALIGNED",
+        pf_aligned_bases = "PF_ALIGNED_BASES",
+        mean_read_length = "MEAN_READ_LENGTH"
+    )
+    
+    insert_metrics_cols <- c(
+        PAIR_ORIENTATION = "PAIR_ORIENTATION",
+        # median_insert_size = "MEDIAN_INSERT_SIZE"
+        insert_size = "MEDIAN_INSERT_SIZE"
+    )
+    
+    tumor_wgs_metrics_cols <- c(
+        # median_coverage = "MEAN_COVERAGE"
+        tumor_median_coverage = "MEDIAN_COVERAGE",
+        # pct_30x = "PCT_30X",
+        greater_than_or_equal_to_30x = "PCT_30X",
+        # pct_50x = "PCT_50X"
+        greater_than_or_equal_to_50x = "PCT_50X",
+        fraction_excluded = "PCT_EXC_TOTAL"
+    )
+
+    normal_wgs_metrics_cols <- c(
+        normal_median_coverage = "MEDIAN_COVERAGE",
+        fraction_excluded = "PCT_EXC_TOTAL"
+    )
+    
+    qc_dup = get_metrics(estimate_library_complexity, complexity_metrics_cols, pair)
+
+    qc_aln = get_metrics(alignment_summary_metrics, alignment_metrics_cols, pair)
+    ix = which(!qc_aln$CATEGORY=="PAIR")
+    qc_aln = subset_which(qc_aln, -ix)
+    qc_aln$fraction_of_reads_aligned = qc_aln$pf_reads_aligned / qc_aln$total_reads
+    qc_aln$CATEGORY = NULL
+
+    qc_insert = get_metrics(insert_size_metrics, insert_metrics_cols, pair)
+    ix = which(!qc_insert$PAIR_ORIENTATION=="FR")
+    qc_insert = subset_which(qc_insert, -ix)
+
+    qc_cov_tumor = get_metrics(tumor_wgs_metrics, tumor_wgs_metrics_cols, pair)
+    qc_cov_tumor$tumor_median_coverage = round(
+        qc_cov_tumor$tumor_median_coverage / (1 - qc_cov_tumor$fraction_excluded)
+    )
+    qc_cov_tumor$fraction_excluded = NULL
+
+    qc_cov_normal = get_metrics(normal_wgs_metrics, normal_wgs_metrics_cols, pair)
+    qc_cov_normal$normal_median_coverage = round(
+        qc_cov_normal$normal_median_coverage / (1 - qc_cov_normal$fraction_excluded)
+    )
+    qc_cov_normal$fraction_excluded = NULL
+
+    # Read and extract metrics from each file
+    
+    # c("pair", "total_reads", "pf_reads_aligned", "pf_aligned_bases", 
+    # "mean_read_length", "median_insert_size", "median_coverage", 
+    # "pct_30x", "pct_50x", "percent_optical_duplication", 
+    # "percent_aligned", "percent_optical_dups_of_dups")
+    # Merge all metrics on pair
+    lst_to_merge = list(
+        qc_dup, 
+        qc_aln, 
+        qc_insert, 
+        qc_cov_tumor,
+        qc_cov_normal
+    )
+    qc_metrics <- Reduce(function(x, y) {
+        data.table::merge.data.table(
+            x, y, by = "pair", 
+            all.x = TRUE, 
+            all.y = TRUE,
+            suffixes = c("_x", "_y")
+        )
+    }, lst_to_merge)
+    
+    # Calculate derivative metrics
+    # Separating out and writing long way for robustness to
+    # missing data.
+    qc_metrics$m_reads = qc_metrics$total_reads / 1e6
+    qc_metrics$m_reads_mapped = qc_metrics$pf_reads_aligned / 1e6
+    qc_metrics$percent_optical_duplication = (
+        qc_metrics$read_pair_optical_duplicates /
+        qc_metrics$read_pairs_examined
+    )
+    qc_metrics$percent_aligned = (
+        qc_metrics$pf_aligned_bases / 
+        ( qc_metrics$total_reads * qc_metrics$mean_read_length )
+    )
+    qc_metrics$percent_optical_dups_of_dups = (
+        qc_metrics$read_pair_optical_duplicates / 
+        qc_metrics$read_pair_duplicates
+    )
+    # # FIXME, need to account for tumor and normal
+    # qc_metrics$normal_median_coverage = NA_integer_
+
+    # Remove any metrics that are NA
+    # This can happen if any derivative metrics
+    # are calculated from qc inputs not provided
+    # in above lines.
+    for (colnm in names(qc_metrics)) {
+        is_all_na = all(is.na(qc_metrics[[colnm]]))
+        if (is_all_na) qc_metrics[[colnm]] = NULL
+    }
+
+    # qc_metrics[, `:=`(
+    #     m_reads = total_reads / 1e6,
+    #     m_reads_mapped = pf_reads_aligned / 1e6,
+    #     percent_optical_duplication = read_pair_optical_duplicates / read_pairs_examined,
+    #     percent_aligned = pf_aligned_bases / (total_reads * mean_read_length),
+    #     percent_optical_dups_of_dups = read_pair_optical_duplicates / read_pair_duplicates
+    # )]
+    
+    return(as.list(qc_metrics))
+}
+
+qc_flag_thresholds = list(
+    list("FAIL", "greater_than_or_equal_to_50x", `<=`, 0.99, "Fraction of genome covered at 50X","< 99%"),
+    list("WARN", "purity", `<`, 0.2, "Purity", "less than 20%"),
+    list("WARN", "insert_size", `<`, 300, "Insert Size", "less than 300 bp"),
+    list("WARN", "percent_duplication", `>`, 0.3, "Duplicate percent", "greater than than 30%"),
+    list("FAIL", "fraction_of_reads_aligned", `<`, 0.9, "Percent of reads aligned", "less than 90%"),
+    list("FAIL", "conpair_concordance_metric", `<`, 0.9, "Tumor/Normal SNP concordance", "less than 90%")
+)
+
+#' QC Flags
+#'
+#' Parse QC flags into strings
+#'
+#' QC metrics from picard need to be parsed based on coverage, insert size
+#' total number of reads, duplicate rate.
+#' The strings should be parsable into a form
+#' digested in gOS and shown as a single "PASS"/Checkmark", "Warning", or "Fail". 
+#' The actual metrics should show up on hover.
+process_qc_flag = function(
+    metadata,
+    qc_flag_thresholds = Skilift:::qc_flag_thresholds
+) {
+
+    check_field = function(list_like, field) {
+        val1 = list_like[[field]]
+        val2 = list_like$coverage_qc[[field]]
+        val3 = list_like$coverage_qc[[1]][[field]]
+        val = val1
+        if (is.null(val)) val = val2
+        if (is.null(val)) val = val3
+        if (is.null(val)) return(NA)
+        return(val)
+    }
+
+    flags_lst = list()
+
+    for (tuple in qc_flag_thresholds) {
+        flag_title = tuple[[1]]
+        field = tuple[[2]]
+        fun_comparator = tuple[[3]]
+        value = tuple[[4]]
+        transformed_name = tuple[[5]]
+        flag_message = tuple[[6]]
+        data_value = check_field(metadata, field)
+        is_na = any(is.na(data_value))
+        if (is_na) {
+            flags_lst = c(flags_lst, list(paste("Unknown:", transformed_name)))
+            next
+        }
+        is_flagged = fun_comparator(data_value, value)
+        if (!is_flagged) {
+            flag_title = "PASS"
+            flag_message = ""
+        }
+        flags_lst = c(
+            flags_lst, 
+            list(
+                paste(
+                    flag_title, 
+                    ": ", 
+                    transformed_name, 
+                    " (", 
+                    signif(data_value, 3), 
+                    ")", " ",
+                    flag_message,
+                    sep = ""
+                )
+            )
+        )
+    }
+
+    ## do.call(function(...) paste(..., collapse = "\n"), flags_lst)
+    metadata$qc_flag = paste(trimws(unlist(flags_lst)), collapse = "\n")
+    return(metadata)
+}
+
 #' @name add_coverage_metrics
 #' @title Add Coverage Metrics
 #' @description
@@ -419,7 +747,15 @@ add_coverage_metrics <- function(
         !is.null(normal_wgs_metrics)
         ) {
         
-        processed_metrics <- process_qc_metrics(
+        # processed_metrics <- process_qc_metrics2(
+        #     estimate_library_complexity,
+        #     alignment_summary_metrics,
+        #     insert_size_metrics,
+        #     tumor_wgs_metrics,
+        #     normal_wgs_metrics,
+        #     metadata$pair
+        # )
+        processed_metrics <- process_qc_metrics2(
             estimate_library_complexity,
             alignment_summary_metrics,
             insert_size_metrics,
@@ -435,6 +771,49 @@ add_coverage_metrics <- function(
         metadata$normal_median_coverage = processed_metrics$normal_median_coverage
     }
 
+    return(metadata)
+}
+
+#' @name add_coverage_metrics
+#' @title Add Coverage Metrics
+#' @description
+#' Adds coverage metrics to the metadata based on tumor coverage and QC metrics.
+#'
+#' @param metadata A data.table containing metadata.
+#' @param tumor_coverage Coverage data for the tumor.
+#' @param foreground_col_name Name of the column in the coverage data to use for foreground coverage
+#' @param estimate_library_complexity Path to library complexity metrics file
+#' @param alignment_summary_metrics Path to alignment summary metrics file
+#' @param insert_size_metrics Path to insert size metrics file
+#' @param wgs_metrics Path to WGS metrics file
+#' @return Updated metadata with coverage metrics added.
+add_conpair <- function(
+    metadata,
+    conpair_contamination = NULL,
+    conpair_concordance = NULL
+    ) {
+
+    normal_conpair_contamination_value = NA_real_
+    tumor_conpair_contamination_value = NA_real_
+    if (!is.null(conpair_contamination)) {
+        conpair_metrics = readLines(conpair_contamination)
+        tumor_conpair_contamination_value = gsub(".*: ", "", conpair_metrics[2])
+        tumor_conpair_contamination_value = as.numeric(gsub("%", "", tumor_conpair_contamination_value)) / 100
+        normal_conpair_contamination_value = gsub(".*: ", "", conpair_metrics[1])
+        normal_conpair_contamination_value = as.numeric(gsub("%", "", normal_conpair_contamination_value)) / 100
+    }
+
+
+
+    conpair_concordance_metric = NA_real_
+    if (!is.null(conpair_concordance)) {
+        conpair_metrics = readLines(conpair_concordance)
+        conpair_concordance_metric = as.numeric(conpair_metrics[1])
+    }
+
+    metadata$tumor_conpair_contamination_metric = tumor_conpair_contamination_value
+    metadata$normal_conpair_contamination_metric = normal_conpair_contamination_value
+    metadata$conpair_concordance_metric = conpair_concordance_metric
     return(metadata)
 }
 
@@ -567,15 +946,25 @@ add_sv_counts <- function(metadata, jabba_gg = NULL) {
 #' @param metadata A data.table containing metadata
 #' @param jabba_gg Path to JaBbA graph RDS file
 #' @return Updated metadata with purity and ploidy information
-add_purity_ploidy <- function(metadata, jabba_gg = NULL, tumor_coverage = NULL) {
-    if (is.null(jabba_gg)) {
+add_purity_ploidy <- function(metadata, purple_pp_bestFit = NULL, jabba_gg = NULL, tumor_coverage = NULL) {
+    is_null_or_na_jabba_gg = is.null(jabba_gg) || any(is.na(jabba_gg))
+    is_null_or_na_purple = is.null(purple_pp_bestFit) || any(is.na(purple_pp_bestFit))
+    is_jabba_gg_and_purple_absent = is_null_or_na_jabba_gg && is_null_or_na_purple
+
+    if (is_jabba_gg_and_purple_absent) {
         return(metadata)
     }
     
-    gg <- process_jabba(jabba_gg)
+    if (!is_null_or_na_jabba_gg) {
+        gg <- process_jabba(jabba_gg)
 
-    purity = base::get("purity", gg$meta) # Errors out if not found
-    ploidy = base::get("ploidy", gg$meta) # Errors out if not found
+        purity = base::get("purity", gg$meta) # Errors out if not found
+        ploidy = base::get("ploidy", gg$meta) # Errors out if not found
+    } else if (!is_null_or_na_purple) {
+        purple_best_fit = fread(purple_pp_bestFit)
+        purity = purple_best_fit$purity
+        ploidy = purple_best_fit$ploidy
+    }
 
     metadata$purity <- purity
     metadata$ploidy <- ploidy
@@ -666,17 +1055,31 @@ add_genome_length <- function(
     jabba_gg = NULL,
     seqnames_genome_width_or_genome_length = c(1:22, "X", "Y")
 ) {
+
+    is_null_jabba = is.null(jabba_gg)
+
+    is_genome_length_already_provided = is.numeric(seqnames_genome_width_or_genome_length) && NROW(seqnames_genome_width_or_genome_length) == 1
+
     # handle targeted panels/whole exome
-    if (is.numeric(seqnames_genome_width_or_genome_length) && NROW(seqnames_genome_width_or_genome_length) == 1) {
+    if (is_genome_length_already_provided) {
         metadata$total_genome_length <- seqnames_genome_width_or_genome_length
         return(metadata)
     }
 
     # otherwise, handle genome-wide
-    if (is.null(jabba_gg) && is.null(seqnames_genome_width_or_genome_length)) {
+    is_no_jabba_or_genome_length_provided = is_null_jabba && is.null(seqnames_genome_width_or_genome_length)
+    if (is_no_jabba_or_genome_length_provided) {
         return(metadata)
     }
-    
+
+    if (is_null_jabba) {
+         ## FIXME: hardcoding to hg19!!
+        genome_length_hg19 = 3095677412
+        message("NO JABBA OR GENOME LENGTH PROVIDED, hardcoding to hg19: ", genome_length_hg19)
+        metadata$total_genome_length = genome_length_hg19
+        return(metadata)
+    }
+
     gg <- process_jabba(jabba_gg)
     nodes.gr <- gg$nodes$gr
     seqlengths.dt <- suppressWarnings(
@@ -902,6 +1305,114 @@ compute_signature_averages <- function(
     }
 }
 
+#' @name compute_cosine_similarity
+#' @title Compute Cosine Similarities   
+#' @description compute consine similarities between reference and attributed signatures
+#'
+#' @param metadata A data.table containing metadata (must have sigprofiler_sbs_count or sigprofiler_indel_count)
+#' @param probabilities Path to probabilities file
+#' @param matrix_file Path to matrix file
+#' @param is_indel Boolean indicating if processing indel signatures
+#' @param is_deconstruct_sigs Boolean indicating if using deconstructSigs format
+#' @param reference Reference genome name (e.g., "hg19", "hg38")
+#' @return List of signature averages
+compute_cosine_similarity <- function(
+    metadata,
+    probabilities,
+    matrix_file,
+    is_indel = FALSE,
+    is_deconstruct_sigs = FALSE,
+    reference = "hg19"
+) {
+
+    if (reference == "hg19") {
+        if (is_indel) {
+            sig_file <- system.file("extdata", "/data/COSMIC_v3.4_ID_GRCh37.txt", package = "Skilift")
+        } else {
+            sig_file <- system.file("extdata", "/data/COSMIC_v3.4_SBS_GRCh37.txt", package = "Skilift")
+        }
+    } else {
+        if (is_indel) {
+            sig_file <- system.file("extdata", "/data/COSMIC_v3.4_ID_GRCh38.txt", package = "Skilift")
+        } else {
+            sig_file <- system.file("extdata", "/data/COSMIC_v3.4_SBS_GRCh38.txt", package = "Skilift")
+        }
+    }
+    
+    weight_reads <- fread(sig_file, fill = TRUE)
+    expected_reads <- copy(weight_reads)
+
+    row_names <- expected_reads[[1]]
+    expected_reads <- expected_reads[, 2:ncol(expected_reads)]
+    rownames(expected_reads) <- row_names
+    
+    ### EXPECTED SIGNATURES ###
+    activities <- if(is_indel) {
+        metadata$sigprofiler_indel_count %>% unlist()
+    } else {
+        metadata$sigprofiler_sbs_count %>% unlist()
+    }
+    matching_signatures <- intersect(names(activities), colnames(expected_reads))
+    
+    if(length(matching_signatures) == 0) {
+        warning("No matching signature names found between expected_reads and activities")
+        return(NULL)
+    }
+    
+    weighted_expected <- as.matrix(expected_reads)
+    
+    weighted_expected[, matching_signatures] <- sweep(weighted_expected[, matching_signatures], 2, activities[matching_signatures], "*")
+
+    ### ATTRIBUTED SIGNATURES ###     
+    probabilities = fread(probabilities, fill = TRUE)
+    prob.matrix <- as.matrix(probabilities[, 3:ncol(probabilities)])
+
+    matrix_file <- fread(matrix_file, fill = TRUE)
+    if (ncol(matrix_file) < 2) {
+        stop("matrix_file must have at least two columns")
+    }
+    multiplier <- as.numeric(matrix_file[[2]])
+    if (length(multiplier) != nrow(prob.matrix)) {
+        stop("Length of multiplier vector must match the number of rows in prob.matrix")
+    }
+    
+    ### COMPUTING COSINE SIMILARITY ###
+    weighted_prob_matrix <- sweep(prob.matrix, 1, multiplier, "*")
+
+    cosine_similarities <- numeric(ncol(weighted_prob_matrix))
+    names(cosine_similarities) <- colnames(weighted_prob_matrix)
+    
+    # Ensure matching columns only
+    common_sigs <- intersect(colnames(weighted_prob_matrix), colnames(weighted_expected))
+    
+    if (length(common_sigs) == 0) {
+        warning("No common signatures between matrices")
+        return(NULL)
+    }
+    
+    # Subset to common columns
+    prob_subset <- weighted_prob_matrix[, common_sigs, drop = FALSE]
+    exp_subset <- weighted_expected[, common_sigs, drop = FALSE]
+    
+    # Vectorized cosine similarity calculation
+    dot_products <- colSums(prob_subset * exp_subset)
+    norms_prob <- sqrt(colSums(prob_subset^2))
+    norms_exp <- sqrt(colSums(exp_subset^2))
+    
+    # Handle zero norm cases
+    zero_norms <- (norms_prob == 0) | (norms_exp == 0)
+    cosine_similarities <- ifelse(zero_norms, 0, dot_products / (norms_prob * norms_exp))
+    names(cosine_similarities) <- common_sigs
+
+    # Replace NaN values with 0
+    cosine_similarities[is.nan(cosine_similarities)] <- 0
+
+    return(list(cosine_similarities = cosine_similarities, 
+                weighted_expected = weighted_expected, 
+                weighted_prob_matrix = weighted_prob_matrix))
+
+}
+
 #' @name add_signatures
 #' @title Add Signatures
 #' @description
@@ -910,15 +1421,24 @@ compute_signature_averages <- function(
 #' @param metadata A data.table containing metadata.
 #' @param signatures_pair_name The name of the signature pair.
 #' @param activities_sbs_signatures Activities of SBS signatures.
+#' @param decomposed_sbs_signatures Probabilities of SBS signatures.
+#' @param matrix_sbs_signatures Matrix of SBS signatures.
 #' @param activities_indel_signatures Activities of indel signatures.
+#' @param decomposed_indel_signatures Matrix of indel signatures.
+#' @param matrix_indel_signatures Matrix of indel signatures.
 #' @param deconstructsigs_sbs_signatures DeconstructSigs SBS signatures.
 #' @return Updated metadata with mutational signatures added.
 add_signatures <- function(
     metadata,
     activities_sbs_signatures,
+    decomposed_sbs_signatures,
+    matrix_sbs_signatures,
     activities_indel_signatures,
+    decomposed_indel_signatures,
+    matrix_indel_signatures,
     deconstructsigs_sbs_signatures
 ) {
+
     # Initialize list columns with proper length
     n <- nrow(metadata)
     metadata[, `:=`(
@@ -932,6 +1452,7 @@ add_signatures <- function(
     )]
 
     if (!is.null(activities_sbs_signatures)) {
+        
         signatures <- compute_signature_averages(
             sig_file = activities_sbs_signatures,
             is_indel = FALSE,
@@ -941,6 +1462,23 @@ add_signatures <- function(
         metadata$sigprofiler_sbs_fraction <- list(as.list(signatures[["sbs_fraction"]]))
         metadata$sigprofiler_sbs_count <- list(as.list(signatures[["sbs_count"]]))
         metadata$signatures <- list(as.list(signatures[["sbs_fraction"]]))
+        
+        if (!is.null(decomposed_sbs_signatures) && !is.null(matrix_sbs_signatures)) {
+            tryCatch({
+
+                cosine_similarities <- compute_cosine_similarity(
+                metadata = metadata,
+                probabilities = decomposed_sbs_signatures,
+                matrix_file = matrix_sbs_signatures,
+                is_indel = FALSE,
+                is_deconstruct_sigs = FALSE #' TODO ADD FUNCTIONALITY FOR different references
+                )
+
+                metadata$sigprofiler_sbs_cosine_similarity <- list(as.list(cosine_similarities[["cosine_similarities"]]))
+            }, error = function(e) {
+                warning(sprintf("Error computing SBS cosine similarities: %s", e$message))
+            })
+        }
     }
 
     if (!is.null(activities_indel_signatures)) {
@@ -952,6 +1490,24 @@ add_signatures <- function(
         metadata$deletionInsertion <- list(as.list(deletionInsertion[["indel_fraction"]]))
         metadata$sigprofiler_indel_fraction <- list(as.list(deletionInsertion[["indel_fraction"]]))
         metadata$sigprofiler_indel_count <- list(as.list(deletionInsertion[["indel_count"]]))
+
+        if(!is.null(decomposed_indel_signatures) && !is.null(matrix_indel_signatures)) {
+            
+
+            tryCatch({
+                cosine_similarities <- compute_cosine_similarity(
+                    metadata = metadata,
+                    probabilities = decomposed_indel_signatures,
+                    matrix_file = matrix_indel_signatures,
+                    is_indel = TRUE,
+                    is_deconstruct_sigs = FALSE #' TODO ADD FUNCTIONALITY FOR different references
+                )
+
+                metadata$sigprofiler_indel_cosine_similarity <- list(as.list(cosine_similarities[["cosine_similarities"]]))
+            }, error = function(e) {
+                warning(sprintf("Error computing indel cosine similarities: %s", e$message))
+            })
+        }
     }
 
     if (!is.null(deconstructsigs_sbs_signatures)) {
@@ -1056,6 +1612,7 @@ add_msisensor_score <- function(metadata, msisensorpro) {
 #'
 #' @param pair The sample pair identifier.
 #' @param tumor_type The type of tumor.
+#' @param tumor_details Details about the tumor.
 #' @param disease The disease associated with the sample.
 #' @param primary_site The primary site of the tumor.
 #' @param inferred_sex The inferred sex of the sample.
@@ -1072,6 +1629,10 @@ add_msisensor_score <- function(metadata, msisensorpro) {
 #' @param signatures_pair_name The name of the signature pair.
 #' @param matrix_indel_signatures Matrix of indel signatures.
 #' @param matrix_sbs_signatures Matrix of SBS signatures.
+#' @param decomposed_sbs_signatures Decomposed SBS signatures.
+#' @param decomposed_indel_signatures Decomposed indel signatures.
+#' @param deconstructsigs_sbs_signatures DeconstructSigs SBS signatures.
+#' @param activities_indel_signatures Activities of indel signatures.
 #' @param activities_sbs_signatures Activities of SBS signatures.
 #' @param hrdetect HRDetect scores.
 #' @param onenesstwoness Oneness and twoness scores.
@@ -1084,9 +1645,11 @@ add_msisensor_score <- function(metadata, msisensorpro) {
 create_metadata <- function(
     pair,
     tumor_type = NULL,
+    tumor_details = NULL,
     disease = NULL, 
     primary_site = NULL,
     inferred_sex = NULL,
+    purple_pp_bestFit = NULL,
     jabba_gg = NULL,
     events = NULL,
     somatic_snvs = NULL,
@@ -1102,6 +1665,10 @@ create_metadata <- function(
     activities_indel_signatures = NULL,
     deconstructsigs_sbs_signatures = NULL,
     activities_sbs_signatures = NULL,
+    decomposed_sbs_signatures = NULL,
+    decomposed_indel_signatures = NULL,
+    matrix_indel_signatures = NULL,
+    matrix_sbs_signatures = NULL,
     hrdetect = NULL,
     onenesstwoness = NULL,
     msisensorpro = NULL,
@@ -1111,12 +1678,14 @@ create_metadata <- function(
     seqnames_genome_width_or_genome_length = c(1:22, "X", "Y"),
     denoised_coverage_field = "foreground",
     is_visible = TRUE,
-	summary = NULL
+	summary = NULL,
+    cohort_type = NULL
 ) {
+
     # Initialize metadata with all possible columns
     metadata <- initialize_metadata_columns(pair)
     # change NA to NULL
-    fix_entries = c("tumor_type", "disease", "primary_site", "inferred_sex", "jabba_gg", "events", "somatic_snvs", "germline_snvs", "tumor_coverage", "estimate_library_complexity", "alignment_summary_metrics", "insert_size_metrics", "wgs_metrics", "het_pileups", "activities_indel_signatures", "deconstructsigs_sbs_signatures", "activities_sbs_signatures", "hrdetect", "onenesstwoness", "msisensorpro", "denoised_coverage_field", "summary")
+    fix_entries = c("tumor_type", "disease", "primary_site", "inferred_sex", "jabba_gg", "events", "somatic_snvs", "germline_snvs", "tumor_coverage", "estimate_library_complexity", "alignment_summary_metrics", "insert_size_metrics", "wgs_metrics", "het_pileups", "activities_indel_signatures", "decomposed_indel_signatures", "matrix_indel_signatures", "deconstructsigs_sbs_signatures", "activities_sbs_signatures", "decomposed_sbs_signatures","matrix_sbs_signatures","hrdetect", "onenesstwoness", "msisensorpro", "denoised_coverage_field", "summary")
     for (x in fix_entries) {
         if (!exists(x) || is.null(get(x)) || is.na(get(x))) {
             assign(x, NULL)
@@ -1124,7 +1693,7 @@ create_metadata <- function(
     }    
 
     # Add each component sequentially
-    metadata <- add_basic_metadata(metadata, tumor_type, disease, primary_site)
+    metadata <- add_basic_metadata(metadata, tumor_type, tumor_details, disease, primary_site)
     metadata <- add_sex_information(metadata, inferred_sex, jabba_gg, tumor_coverage)
     # Add coverage metrics
     metadata <- add_coverage_metrics(
@@ -1141,7 +1710,7 @@ create_metadata <- function(
     
     # New SV-related function calls
     metadata <- add_sv_counts(metadata, jabba_gg)
-    metadata <- add_purity_ploidy(metadata, jabba_gg, tumor_coverage = tumor_coverage)
+    metadata <- add_purity_ploidy(metadata, purple_pp_bestFit = purple_pp_bestFit, jabba_gg = jabba_gg, tumor_coverage = tumor_coverage)
     # metadata <- add_loh(metadata, jabba_gg, seqnames_loh)
     metadata <- add_fga(metadata, jabba_gg, seqnames_autosomes)
     metadata <- add_genome_length(metadata, jabba_gg, seqnames_genome_width_or_genome_length)
@@ -1150,12 +1719,17 @@ create_metadata <- function(
     metadata <- add_het_pileups_parameters(metadata, het_pileups)
     
     # Add TMB calculation
-    metadata <- add_tmb(metadata, somatic_snvs, jabba_gg, genome, seqnames_genome_width_or_genome_length)
+    if (!cohort_type == "heme")
+        metadata <- add_tmb(metadata, somatic_snvs, jabba_gg, genome, seqnames_genome_width_or_genome_length)
     
     metadata <- add_signatures(
         metadata,
         activities_sbs_signatures,
+        decomposed_sbs_signatures,
+        matrix_sbs_signatures,
         activities_indel_signatures,
+        decomposed_indel_signatures,
+        matrix_indel_signatures,
         deconstructsigs_sbs_signatures
     )
     
@@ -1163,11 +1737,14 @@ create_metadata <- function(
     metadata <- add_hrd_scores(metadata, hrdetect, onenesstwoness)
 
     # Add MSIsensor score
-    metadata <- add_msisensor_score(metadata, msisensorpro)    
+    metadata <- add_msisensor_score(metadata, msisensorpro)
+    metadata <- add_conpair(metadata = metadata, conpair_contamination = conpair_contamination, conpair_concordance = conpair_concordance)
 
     if (!as.logical(is_visible)) {
         metadata$visible <- FALSE
     }
+
+    metadata = process_qc_flag(metadata, Skilift:::qc_flag_thresholds)
 
 	metadata$summary = summary
     
@@ -1199,7 +1776,7 @@ lift_metadata <- function(cohort, output_data_dir, cores = 1, genome_length = c(
     jabba_column = Skilift::DEFAULT_JABBA(object = cohort)
     # Define all possible columns
     all_cols <- c(
-        "pair", "tumor_type", "disease", "primary_site", "inferred_sex",
+        "pair", "tumor_type", "tumor_details", "disease", "primary_site", "inferred_sex",
         # "jabba_gg", 
 		jabba_column,
 		"events", "oncokb_snv", "somatic_snvs", "germline_snvs", "tumor_coverage",
@@ -1225,6 +1802,7 @@ lift_metadata <- function(cohort, output_data_dir, cores = 1, genome_length = c(
         genome_length <- c(1:22, "X", "Y")
     }
     
+    cohort_type = cohort$type
     # Process each sample in parallel
     list_metadata = mclapply(seq_len(nrow(lift_inputs)), function(i) {
         row <- lift_inputs[i,]
@@ -1237,11 +1815,11 @@ lift_metadata <- function(cohort, output_data_dir, cores = 1, genome_length = c(
         out_file <- file.path(pair_dir, "metadata.json")
 
         # prefer oncokb_snv over somatic_snvs if available
-        snvs_column <- ifelse(
-            !is.null(row$oncokb_snv) && !is.na(row$oncokb_snv),
-            row$oncokb_snv,
-            row$somatic_snvs
-        )
+        is_oncokb_present = !is.null(row$oncokb_snv) && !is.na(row$oncokb_snv)
+        snvs_column = row$somatic_snvs
+        if (is_oncokb_present) {
+            snvs_column = row$oncokb_snv
+        }
 		
 		inferred_sex_field = row$inferred_sex
 
@@ -1270,13 +1848,16 @@ lift_metadata <- function(cohort, output_data_dir, cores = 1, genome_length = c(
             metadata <- create_metadata(
                 pair = row$pair,
                 tumor_type = row$tumor_type,
+                tumor_details = row$tumor_details,
                 disease = row$disease,
                 primary_site = row$primary_site,
                 inferred_sex = inferred_sex_field,
+                purple_pp_bestFit = row$purple_pp_bestFit,
                 jabba_gg = row[[jabba_column]],
                 events = row$events,
                 somatic_snvs = snvs_column,
                 germline_snvs = row$germline_snvs,
+                foreground_col_name = row$denoised_coverage_field,
                 tumor_coverage = row$tumor_coverage,
                 estimate_library_complexity = row$estimate_library_complexity,
                 alignment_summary_metrics = row$alignment_summary_metrics,
@@ -1286,13 +1867,18 @@ lift_metadata <- function(cohort, output_data_dir, cores = 1, genome_length = c(
                 het_pileups = row$het_pileups,
                 activities_sbs_signatures = row$activities_sbs_signatures,
                 activities_indel_signatures = row$activities_indel_signatures,
+                decomposed_sbs_signatures = row$decomposed_sbs_signatures,
+                decomposed_indel_signatures = row$decomposed_indel_signatures,
+                matrix_indel_signatures = row$matrix_indel_signatures,
+                matrix_sbs_signatures = row$matrix_sbs_signatures,
                 hrdetect = row$hrdetect,
                 onenesstwoness = row$onenesstwoness,
                 msisensorpro = row$msisensorpro,
                 seqnames_genome_width_or_genome_length = genome_length,
                 denoised_coverage_field = row$denoised_coverage_field,
                 is_visible = row$metadata_is_visible,
-				summary = row$string_summary
+				summary = row$string_summary,
+                cohort_type = cohort_type
             )
 
             if (is.null(metadata)) {
@@ -1317,7 +1903,7 @@ lift_metadata <- function(cohort, output_data_dir, cores = 1, genome_length = c(
         })
     }, mc.cores = cores, mc.preschedule = TRUE)
 
-	metadata_tbls = rbindlist(list_metadata)
+	metadata_tbls = rbindlist(list_metadata, fill = TRUE)
 	cohort$inputs = Skilift::merge.repl(cohort$inputs, metadata_tbls, by = "pair", prefer_x = TRUE, prefer_y = FALSE)
 
     # invisible(NULL)
@@ -1356,11 +1942,113 @@ lift_datafiles_json <- function(output_data_dir, cores = 1) {
   }
   
   # Read each JSON file and combine them into a list
-  combined_data <- mclapply(metadata_files, function(file) {
-    unbox(jsonlite::fromJSON(file))
-  }, mc.cores = cores)
+combined_data <- mclapply(metadata_files, function(file) {
+    
+    if (!file.exists(file)) {
+        warning(sprintf("File does not exist: %s", file))
+        return(NULL)
+    }
+    
+    if (!file.access(file, 4) == 0) {
+        warning(sprintf("File is not readable: %s", file))
+        return(NULL)
+    }
+    
+    if (!grepl("\\.json$", file, ignore.case = TRUE)) {
+        warning(sprintf("File is not a JSON file: %s", file))
+        return(NULL)
+    }
+    
+    file_info <- file.info(file)
+    if (is.na(file_info$size) || file_info$size == 0) {
+        warning(sprintf("JSON file is empty: %s", file))
+        return(NULL)
+    }
+    json_content <- jsonlite::fromJSON(file)
+    return(jsonlite::unbox(json_content))
+    
+}, mc.cores = cores)
+
+# Remove NULL entries from failed reads
+combined_data <- combined_data[!sapply(combined_data, is.null)]
 
   # Write the combined JSON list to "datafiles.json" in the data directory
   output_file <- file.path(output_data_dir, "datafiles.json")
   jsonlite::write_json(combined_data, output_file, auto_unbox = TRUE, pretty = TRUE, null = "null")
+
+  invisible(convert_json_to_arrow(output_file))
+  
+}
+
+
+#' Convert a JSON file to an Arrow file.
+#'
+#' @param json_file_path Path to the input JSON file.
+#' @param arrow_file_path Optional. Path to the output Arrow file.
+#'   If NULL, the output path will be the same as the input JSON file,
+#'   but with the .arrow extension.
+#'
+#' @return Invisibly returns the path to the created Arrow file.
+#' @author Shihab Dider
+#' @export
+convert_json_to_arrow <- function(json_file_path, arrow_file_path = NULL) {
+  # Validate input file path
+  if (!file.exists(json_file_path)) {
+    stop("JSON file not found: ", json_file_path)
+  }
+
+  # Determine output file path if not provided
+  if (is.null(arrow_file_path)) {
+    arrow_file_path <- sub("\\.json$", ".arrow", json_file_path, ignore.case = TRUE)
+    if (arrow_file_path == json_file_path) {
+      # In case the extension wasn't .json or sub failed
+      arrow_file_path <- paste0(json_file_path, ".arrow")
+    }
+  }
+
+  # Read JSON data
+  tryCatch({
+    data <- jsonlite::read_json(json_file_path, simplifyDataFrame = TRUE)
+  }, error = function(e) {
+    stop("Error reading JSON file: ", e$message)
+  })
+  
+  # Ensure data is a data.frame
+  if (!is.data.frame(data)) {
+    tryCatch({
+      data <- as.data.frame(data)
+    }, error = function(e) {
+      stop("Could not convert JSON content to a data.frame: ", e$message)
+    })
+  }
+
+  # Pre-process list columns that might cause issues with Arrow type inference
+  for (col_name in names(data)) {
+    # Only process actual list-columns, not columns that are themselves data.frames
+    if (is.list(data[[col_name]]) && !is.data.frame(data[[col_name]])) {
+      is_simple_empty <- function(el) {
+        is.null(el) ||
+        (is.atomic(el) && length(el) == 0) ||
+        (is.list(el) && !is.data.frame(el) && length(el) == 0)
+      }
+      
+      all_elements_empty <- all(sapply(data[[col_name]], is_simple_empty))
+      
+      if (all_elements_empty) {
+        cat(paste("Transforming column:", col_name, "to a vector of NA_character_ because all its elements were simple_empty.\n"))
+        # Convert to a simple vector of NA_character_ of the correct length
+        data[[col_name]] <- rep(NA_character_, length(data[[col_name]]))
+      }
+    }
+  }
+
+  # Write Arrow file
+  tryCatch({
+    arrow::write_feather(data, arrow_file_path)
+  }, error = function(e) {
+    stop("Error writing Arrow file: ", e$message)
+  })
+
+  message("Successfully converted ", json_file_path, " to ", arrow_file_path)
+  return(invisible(data))
 }
