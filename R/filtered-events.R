@@ -953,6 +953,11 @@ collect_gene_mutations <- function(
   vars <- gr2dt(bcf)[, .(gene, vartype, variant.g, variant.p, distance, annotation, type = short, track = "variants", source = "annotated_bcf")]
   setkey(vars, variant.g)
   vars <- vars[, .SD[1], by = variant.g]
+  vars$vcf_pos = vars$start
+  vars$vcf_ref = vars$REF
+  vars$vcf_alt = vars$ALT
+  vars$Chromosome = as.character(vars$seqnames)
+  
 
   return(rbind(mut.density, vars, fill = TRUE, use.names = TRUE))
 }
@@ -1282,6 +1287,13 @@ collect_oncokb <- function(oncokb_maf, multiplicity = NA_character_, verbose = T
   }
 
   if (is_oncokb_populated) {
+    mat_vcf_id = stringr::str_split_fixed(oncokb$vcf_id, "_|/", n = 3)
+    vcf_ref = mat_vcf_id[,2]
+    vcf_alt = mat_vcf_id[,3]
+    oncokb$vcf_ref = vcf_ref
+    oncokb$vcf_alt = vcf_alt
+    rm(mat_vcf_id)
+
       ## oncokb$snpeff_ontology <- snpeff_ontology$short[match(oncokb$Consequence, snpeff_ontology$eff)]
 	
     oncokb$short <- dplyr::case_when(
@@ -1346,10 +1358,344 @@ collect_oncokb <- function(oncokb_maf, multiplicity = NA_character_, verbose = T
       vartype = "SNV",
       track = "variants",
       source = "oncokb_maf",
-      is_multi_hit_per_gene
+      is_multi_hit_per_gene,
+      Chromosome,
+      vcf_pos,
+      Tumor_Seq_Allele2,
+      vcf_ref,
+      vcf_alt
     )])
   }
   return(empty_output_oncokb)
+}
+
+
+
+
+
+
+merge_annotations = function(onco, annotated_vcf) {
+  is_vcf_path = is.character(annotated_vcf) && length(annotated_vcf) == 1
+  if (is_vcf_path && !all(file.exists(annotated_vcf))) stop("annotated_vcf path does not exist to merge with oncotable")
+  if (is_vcf_path) {
+    annotated_vcf = gGnome:::read_vcf(annotated_vcf)
+  }
+
+  is_vcf_granges = inherits(annotated_vcf, "GRanges")
+  if (!is_vcf_granges) {
+    annotated_vcf = as(annotated_vcf, "GRanges")
+  }
+  if (!is_vcf_granges) stop("annotated_vcf must be coercible to a VCF/BCF file or a GRanges object")
+  vcf = annotated_vcf
+  
+  vcf$REF = as.character(vcf$REF)
+  vcf$ALT = as.character(S4Vectors::unstrsplit(vcf$ALT))
+  # nc_ref = nchar(vcf$REF)
+  # nc_alt = nchar(vcf$ALT)
+  # vtype = data.table::fcase(
+  #   nc_ref == 1 & nc_alt == 1, "SNV",
+  #   nc_ref > 1 & nc_alt == 1, "DEL",
+  #   nc_ref == 1 & nc_alt > 1, "INS",
+  #   default = "OTHER"
+  # )
+  # maf_alt = data.table::fcase(
+  #   vtype == "DEL", "-",
+  #   vtype == "INS", substring(vcf$ALT, 2),
+  #   default = vcf$ALT
+  # )
+  dtvcf = gUtils::gr2dt(vcf)
+  # dtvcf$maf_alt = maf_alt
+  dtvcf[, vkey := paste(seqnames, start, maf_alt)]
+  dtvcf[, vkey := paste(seqnames, start, ALT, sep = "-___-")]
+  # data.table::setkey(dtvcf, vkey)
+
+
+  for (col in names(dtvcf)) {
+    is_list = inherits(dtvcf[[col]], c("list", "List"))
+    is_character = any(grepl("character", collapse::vclasses(dtvcf[[col]])))
+    if (!is_list) next
+    if (!is_character) next
+    dtvcf[[col]] = S4Vectors::unstrsplit(dtvcf[[col]])
+  }
+  
+
+  onco = onco[order(factor(Chromosome, c(1:22, "X", "Y", "M", "MT")), vcf_pos)]
+
+  onco$IX = seq_len(NROW(onco))
+
+  onco[, vkey := paste(Chromosome, vcf_pos, vcf_alt, sep = "-___-")]
+  onco = merge(
+    onco,
+    base::subset(
+      dtvcf,
+      select = c("vkey", Skilift:::echtvar_vcf_fields)
+    ),
+    all.x = TRUE,
+    by = "vkey",
+    suffixes = c("", "___VCF")
+  )
+  onco = base::subset(
+    onco,
+    select = grep("___VCF", names(onco), value = TRUE, invert = TRUE)
+  )
+  data.table::setorder(onco, IX)
+  suppressWarnings({
+    onco$vkey = NULL
+    onco$IX = NULL
+  })
+
+  return(onco)
+
+}
+
+is_oncotable_annotated = function(ot) {
+  is_data_table = inherits(ot, "data.table") || inherits(ot, "data.frame")
+  if (!is_data_table) return(NA)
+
+  has_echtvar_fields = all(Skilift:::echtvar_vcf_fields %in% names(ot))
+  return(has_echtvar_fields)
+}
+
+annotation_template = list(
+  list(
+    title = "OncoKB", ## String
+    code = -1, ## enum -1..10
+    score = -1, ## float32
+    display = "VUS"
+  )
+)
+
+    
+
+parse_echtvar_oncotable = function(ot) {
+  if (!Skilift:::is_oncotable_annotated(ot)) return(ot)
+  ## data.table::fcase(
+  ##   grepl("benign", ot$clinvar_ONC
+  ##   ot$clinvar_ONC %in% c("Oncogenic", "Likely_oncogenic")
+
+  is_benign_onc_clinvar = grepl("benign", ot$clinvar_ONC, ignore.case = TRUE)
+  is_pathogenic_onc_clinvar = grepl("pathogenic", ot$clinvar_ONC, ignore.case = TRUE)
+  is_cancer_related = grepl(
+    glue::glue(
+      '(',
+      glue::glue(
+        'cancer',
+        'carcinoma',
+        'sarcoma',
+        'melanoma',
+        'leukemia',
+        'lymphoma',
+        'neoplasm',
+        'tumor',
+        'adenoma',
+        'myeloma',
+        'blastoma',
+        'glioma',
+        .sep = '|'
+      ),
+      ")"
+    ),
+    ot$clinvar_CLNDN,
+    ignore.case = TRUE
+  )
+  patho = tolower(ot$clinvar_CLNSIG)
+  is_conflicting = grepl("conflicting", patho)
+  is_pathogenic = grepl("pathogenic", patho) & !is_conflicting
+  is_benign = grepl("benign", patho)
+  selection_string = data.table::fcase(
+    is_benign_onc_clinvar, "Benign (Onc)",
+    is_pathogenic_onc_clinvar, "Oncogenic",
+    !is_cancer_related, "Not Cancer Related",
+    is_benign, "Benign",
+    is_pathogenic, "Pathogenic",
+    default = NA_character_
+  )
+  code = data.table::fcase(
+    selection_string == "Benign (Onc)", 0L,
+    selection_string == "Oncogenic", 10L,
+    selection_string == "Not Cancer Related", -1L,
+    selection_string == "Benign", 0L,
+    selection_string == "Pathogenic", 10L,
+    default = -1L
+  )
+
+  template_clinvar = Skilift::copy(annotation_template)
+
+  clinvar_dt = data.table(
+    title = "Clinvar",
+    code = code,
+    score = -1,
+    display = selection_string
+  )
+  clinvar_dt[, IX := seq_len(.N)]
+  tlst_clinvar = clinvar_dt[, list(dt = list(list(as.list(.SD)))), by = IX]
+
+  ncref = nchar(ot$vcf_ref)
+  ncalt = nchar(ot$vcf_alt)
+
+  vtype = data.table::fcase(
+    ncref == 1 & ncalt == 1, "SNV",
+    ncref > 1 & ncalt == 1, "DEL",
+    ncref == 1 & ncalt > 1, "INS",
+    ncref == ncalt, "MNP",
+    default = "OTHER"
+  )
+
+  is_snv = vtype == "SNV"
+
+  am_pred = c(
+    "LP" = "Pathogenic",
+    "P" = "Pathogenic",
+    "B" = "Benign",
+    "LB" = "Benign",
+    "A" = "Ambiguous",
+    "MISSING" = "Missing",
+    "." = "Missing"
+  )[ot$dbNSFP_AlphaMissense_pred]
+
+  code = data.table::fcase(
+    !vtype == "SNV", -1L,
+    am_pred == "Pathogenic", 10L,
+    am_pred == "Benign", 0L,
+    default = -1L
+  )
+  
+  am_dt = data.table(
+    title = "AlphaMissense",
+    code = code,
+    score = ot$dbNSFP_AlphaMissense_score,
+    display = am_pred,
+    is_snv = is_snv
+  )
+
+  am_dt[, IX := seq_len(.N)]
+
+  tlst_am = am_dt[,
+  {
+    ENV = environment()
+    main = function() {
+      if (!is_snv) return(list(dt = list(list())))
+      out = .SD[, -c("is_snv")]
+      return(list(dt = list(list(as.list(out)))))
+    }
+    main()
+  },  by = IX ]
+
+  ## SIFT
+  sift_pred = c(
+    "T" = "Tolerated",
+    "D" = "Damaging",
+    "MISSING" = "Missing",
+    "." = "Missing"
+  )[ot$dbNSFP_SIFT_pred]
+
+  code = data.table::fcase(
+    !vtype == "SNV", -1L,
+    grepl("damaging", sift_pred, ignore.case = TRUE), 10L,
+    sift_pred == "Tolerated", 0L,
+    default = -1L
+  )
+  
+  sift_dt = data.table(
+    title = "SIFT",
+    code = code,
+    score = ot$dbNSFP_SIFT_score,
+    display = sift_pred,
+    is_snv = is_snv
+  )
+
+  sift_dt[, IX := seq_len(.N)]
+
+  tlst_sift = sift_dt[,
+  {
+    ENV = environment()
+    main = function() {
+      if (!is_snv) return(list(dt = list(list())))
+      out = .SD[, -c("is_snv")]
+      return(list(dt = list(list(as.list(out)))))
+    }
+    main()
+  },  by = IX ]
+
+  ## Polyphen2
+  pphen_pred = c(
+    "B" = "Benign",
+    "D" = "Damaging",
+    "P" = "Likely Damaging",
+    "MISSING" = "Missing",
+    "." = "Missing"
+  )[ot$dbNSFP_Polyphen2_HVAR_pred]
+
+  code = data.table::fcase(
+    !vtype == "SNV", -1L,
+    grepl("damaging", pphen_pred, ignore.case = TRUE), 10L,
+    pphen_pred == "Benign", 0L,
+    default = -1L
+  )
+  
+  pphen_dt = data.table(
+    title = "Polyphen2 HVAR",
+    code = code,
+    score = ot$dbNSFP_Polyphen2_HVAR_score,
+    display = pphen_pred,
+    is_snv = is_snv
+  )
+
+  pphen_dt[, IX := seq_len(.N)]
+
+  tlst_pphen = pphen_dt[,
+  {
+    ENV = environment()
+    main = function() {
+      if (!is_snv) return(list(dt = list(list())))
+      out = .SD[, -c("is_snv")]
+      return(list(dt = list(list(as.list(out)))))
+    }
+    main()
+  },  by = IX ]
+
+
+  tlst_mg = Reduce(
+    f = function(x,y) {
+      merge(x,y, by = "IX")
+    },
+    list(
+      tlst_clinvar,
+      tlst_am,
+      tlst_sift,
+      tlst_pphen
+    )
+  )
+  nms = names(tlst_mg)
+  rename_ix = seq(from = 2, to = NROW(nms), length.out = NROW(nms))
+  nms[
+    rename_ix
+  ] = c("clinvar", "am", "sift", "pphen")
+  names(tlst_mg) = nms
+  tlst_final = tlst_mg[,
+  {
+    ENV = environment()
+    main = function() {
+      force(.SD)
+      lst_of_lst = base::mget(
+        c(
+          "clinvar",
+          "am",
+          "sift",
+          "pphen"
+        ),
+        envir = ENV
+      )
+      lst_of_lst = unname(lst_of_lst)
+      out_lst = do.call(c, unlist(lst_of_lst, recursive = FALSE))
+      return(list(out_lst = list(out_lst)))
+    }
+    main()
+  },  by = IX ]
+
+  ot[["echtvar_fields"]] = tlst_final$out_lst
+  
+  return(ot)
 }
 
 
@@ -1455,6 +1801,23 @@ oncotable <- function(
       fill = TRUE,
       use.names = TRUE
     )
+  }
+
+  is_echtvar_vcf_present = (
+    !is.null(somatic_variant_annotations) 
+    && !any(is.na(somatic_variant_annotations)) 
+    && all(file.exists(somatic_variant_annotations)) 
+    && all(grepl("echtvar", somatic_variant_annotations))
+  )
+
+  are_small_variants_populated = (
+    NROW(out$type) > 0
+    && any(out$track %in% "variants")
+  )
+
+  if (is_echtvar_vcf_present && are_small_variants_populated) {
+    ## merge echtvar
+    out <- merge_annotations(out, somatic_variant_annotations)
   }
 
   ## add gene locations
@@ -1705,8 +2068,10 @@ create_filtered_events <- function(
         "resistances" = "resistances",
         "diagnoses" = "diagnoses",
         "prognoses" = "prognoses",
-        "is_multi_hit_per_gene" = "is_multi_hit_per_gene"
+        "is_multi_hit_per_gene" = "is_multi_hit_per_gene",
+        "echtvar_fields" = "tertiary_field"
     )
+
 
   res.final = Skilift:::change_names(possible_drivers, oncotable_col_to_filtered_events_col)
 
@@ -1746,6 +2111,8 @@ create_filtered_events <- function(
         snvs$variant.p = variant_concatenated
         ## snvs$variant.c = NULL
         rm("variant_concatenated")
+
+        snvs = Skilift:::parse_echtvar_oncotable(snvs)
         
       }
 
@@ -1783,18 +2150,10 @@ create_filtered_events <- function(
     res[, start := tstrsplit(Genome_Location, "-", fixed = TRUE, keep = 1)]
     res[, start := tstrsplit(start, ":", fixed = TRUE, keep = 2)]
     res[, end := tstrsplit(Genome_Location, "-", fixed = TRUE, keep = 2)]
-    res.mut <- res[vartype == "SNV"]
+    res.mut <- res[vartype == "SNV"] ## FIXME: This is all small mutations, not just SNV
     if (nrow(res.mut) > 0) {
-      # res.mut[, Variant := gsub("p.", "", Variant)]
-      # res.mut[, vartype := "SNV"]
-      # TODO:
-      # truncating mutations are not always deletions
-      # initial logic may be misleading calling all small mutations "SNV"
-      # but we should encode this as something more robust
-      # res.mut[type=="trunc", vartype := "DEL"]
-      ## res.mut
-      
-      ## FIXME: Nothing seems to be necessary here at this point.
+      ## FIXME: Doesn't do anything? maybe parse echtvar further here..
+
       NULL
     }
     res.fus = res[type == "fusion",] ## need to deal each class explicitly
@@ -1987,7 +2346,7 @@ create_filtered_events <- function(
     ## Note that return_table for debugging purposes as well.
 
   }
-  write_json(res.final, out_file, pretty = TRUE)
+  jsonlite::write_json(res.final, out_file, pretty = TRUE)
   if (return_table) {
       return(res.final)
   }

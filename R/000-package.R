@@ -49,3 +49,21 @@ qc_flag_thresholds = list(
     list("FAIL", "fraction_of_reads_aligned", `<`, 0.9, "Percent of reads aligned", "90%"),
     list("FAIL", "conpair_concordance_metric", `<`, 0.9, "Tumor/Normal SNP concordance", "90%")
 )
+
+
+#' Echtvar annotated vcf fields
+#' 
+#' Fields from echtvar annotated vcf to keep
+echtvar_vcf_fields = c("dbNSFP_gene", "dbNSFP_transcript_id", "dbNSFP_VEP_canonical", 
+"dbNSFP_aaref", "dbNSFP_aaalt", "dbNSFP_AlphaMissense_score", 
+"dbNSFP_AlphaMissense_pred", "dbNSFP_REVEL_score", "dbNSFP_CADD_phred", 
+"dbNSFP_SIFT_pred", "dbNSFP_Polyphen2_HVAR_pred", "dbNSFP_ESM1b_pred", 
+"dbNSFP_ESM1b_score", "dbNSFP_RegeneronME_ALL_AF", "dbNSFP_gnomAD211_exomes_controls_AF", 
+"dbNSFP_gnomAD211_exomes_controls_POPMAX_AF", "dbNSFP_gnomAD41_joint_AF", 
+"dbNSFP_gnomAD41_joint_POPMAX_AF", "dbNSFP_clinvar_clnsig", "dbNSFP_clinvar_trait", 
+"dbNSFP_clinvar_review", "dbNSFP_clinvar_hgvs", "clinvar_CLNSIG", 
+"clinvar_CLNDN", "clinvar_CLNREVSTAT", "clinvar_ALLELEID", "clinvar_GENEINFO", 
+"clinvar_CLNVC", "clinvar_MC", "clinvar_CLNHGVS", "clinvar_ONC", 
+"clinvar_ONCDN", "clinvar_ONCCONF", "clinvar_ONCREVSTAT", "clinvar_SCI", 
+"clinvar_SCIDN", "clinvar_SCIREVSTAT", "civic_GN", "civic_VT", 
+"civic_CSQ")
