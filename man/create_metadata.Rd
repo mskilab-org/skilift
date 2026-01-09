@@ -44,7 +44,8 @@ create_metadata(
   conpair_contamination = NULL,
   conpair_concordance = NULL,
   cohort_type = NULL,
-  qc_flags_config = NULL
+  qc_flags_config = NULL,
+  added_field_values = NULL
 )
 }
 \arguments{

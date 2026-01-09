@@ -880,14 +880,18 @@ add_coverage_metrics <- function(
         coverage_variance <- list(coverage_variance = cov_var)
         metadata$coverage_qc <- list(list(coverage_variance))
     }
+
+    test_exists = function(x) {
+        !is.null(x) && !any(Skilift::is_loosely_na(x))
+    }
     
     processed_metrics <- NULL
     if (
-        !is.null(estimate_library_complexity) ||
-        !is.null(alignment_summary_metrics) ||
-        !is.null(insert_size_metrics) ||
-        !is.null(tumor_wgs_metrics) ||
-        !is.null(normal_wgs_metrics)
+        test_exists(estimate_library_complexity) ||
+        test_exists(alignment_summary_metrics) ||
+        test_exists(insert_size_metrics) ||
+        test_exists(tumor_wgs_metrics) ||
+        test_exists(normal_wgs_metrics)
         ) {
         
         # processed_metrics <- process_qc_metrics2(
@@ -1027,14 +1031,15 @@ add_variant_counts <- function(
         is_vcf = is_snvs_exists && grepl("(v|b)cf(.gz|.bgz)?$", somatic_snvs)
         is_txt = is_snvs_exists && grepl("(txt|maf|(t|c)sv)(.gz|.bgz)?$", somatic_snvs)
         is_numeric = is_length_one && is.numeric(somatic_snvs)
-        is_other = !is_numeric && (is_txt || is_rds)
+        is_other_path = is_snvs_exists && !is_rds && !is_vcf
+        is_other = !is_numeric && (is_txt || is_rds || is_other_path)
         is_numeric_or_other = is_numeric || is_other
         snv_counts_dt = data.table()
         if (is_vcf) {
             snv_counts_dt <- vcf_count(somatic_snvs, genome = genome)
         }
         if (is_rds) snvs = readRDS(somatic_snvs)
-        if (is_txt) snvs = fread(somatic_snvs)
+        if (is_txt || is_other_path) snvs = fread(somatic_snvs)
         if (is_numeric) {
             snv_count = somatic_snvs
         } else if (is_other) {
@@ -1675,7 +1680,8 @@ create_metadata <- function(
     conpair_contamination = NULL,
     conpair_concordance = NULL,
     cohort_type = NULL,
-    qc_flags_config = NULL
+    qc_flags_config = NULL,
+    added_field_values = NULL
 ) {
     # Initialize metadata with all possible columns
     metadata <- initialize_metadata_columns(pair)
@@ -1754,6 +1760,14 @@ create_metadata <- function(
     metadata = process_qc_flag(metadata, qc_flags_config)
 
 	metadata$summary = summary
+
+    lstix = seq_len(NROW(added_field_values))
+    for (ii in lstix) {
+        field = added_field_values[ii]
+        fnm = names(field)
+        value = field[[1]]
+        metadata[[fnm]] = value
+    }
     
     return(metadata)
 }
@@ -1769,7 +1783,17 @@ create_metadata <- function(
 #' @param genome_length Genome length for the samples (for targeted panels or WES data)
 #' @return None
 #' @export
-lift_metadata <- function(cohort, output_data_dir, cores = 1, genome_length = c(1:22, "X", "Y"), do_lift_datafiles_json = TRUE) {
+lift_metadata <- function(
+    cohort, 
+    output_data_dir, 
+    cores = 1, 
+    genome_length = c(1:22, "X", "Y"), 
+    do_lift_datafiles_json = TRUE,
+    added_fields = list(
+        tmb = c("field" = "tmb")
+    ),
+    added_from_schema = list(Skilift:::template_metadata)
+) {
     if (!inherits(cohort, "Cohort")) {
         stop("Input must be a Cohort object")
     }
@@ -1846,6 +1870,20 @@ lift_metadata <- function(cohort, output_data_dir, cores = 1, genome_length = c(
 			inferred_sex_field = fread(purple_qc_path_for_fread, header = FALSE)[V1 == "AmberGender"]$V2
 			inferred_sex_field = tools::toTitleCase(tolower(inferred_sex_field))
 		}
+
+        lstix = seq_len(NROW(added_fields))
+        added_fields_lst = list()
+
+        for (ii in lstix) {
+            f = added_fields[ii]
+            fnm = names(f)
+            is_in_row = all(exists(fnm, envir = as.environment(row)))
+            if (!is_in_row) next
+            append_lst = list(row[[fnm]])
+            names(append_lst) = fnm
+            added_fields_lst = c(added_fields_lst, append_lst)
+        }
+        
         
         futile.logger::flog.threshold("ERROR")
         tryCatchLog({
@@ -1888,7 +1926,8 @@ lift_metadata <- function(cohort, output_data_dir, cores = 1, genome_length = c(
                 conpair_concordance = row[["conpair_concordance"]],
                 summary = row[["string_summary"]],
                 cohort_type = cohort_type,
-                qc_flags_config = row[["qc_flags"]][[1]]
+                qc_flags_config = row[["qc_flags"]][[1]],
+                added_field_values = added_fields_lst
             )
 
             if (is.null(metadata)) {
@@ -1963,9 +2002,22 @@ lift_datafiles_json <- function(output_data_dir, cores = 1) {
   
   
   # Read each JSON file and combine them into a list
-  combined_data <- mclapply(metadata_files, function(file) {
-    unbox(jsonlite::fromJSON(file))
-  }, mc.cores = cores)
+  combined_data <- mclapply(
+    X = metadata_files, 
+    FUN = function(file) {
+        main = function() {
+            unbox(jsonlite::fromJSON(file))
+        }
+        tryCatchLog(
+            main(), 
+            error = function(e) {
+                warning(sprintf("Error reading %s: %s", file, e$message))
+                NULL
+            }
+        )
+    }, 
+    mc.cores = cores
+)
 
   # Write the combined JSON list to "datafiles.json" in the data directory
   output_file <- file.path(output_data_dir, "datafiles.json")

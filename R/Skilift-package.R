@@ -11,7 +11,7 @@
 #' @importFrom pals glasbey
 #' @importFrom googlesheets4 read_sheet gs4_auth
 #' @importFrom tryCatchLog tryCatchLog
-#' @importFrom VariantAnnotation readVcf geno ref alt
+#' @importFrom VariantAnnotation readVcf geno ref alt scanVcfHeader
 #' @importFrom arrow Table write_feather schema float32
 #' @importFrom gGnome cov2cov.js
 #' @importFrom gUtils gr2dt dt2gr %Q% gr.val %$% %*% gr.chr gr.nochr gr.findoverlaps gr.stripstrand gr.tile
@@ -28,7 +28,7 @@
 #' @importMethodsFrom GenomeInfoDb seqnames seqnames<- seqinfo seqinfo<- seqlengths seqlengths<- seqlevels seqlevels<- seqlevelsStyle seqlevelsStyle<- sortSeqlevels
 #' @importMethodsFrom GenomicRanges start end
 #' @importMethodsFrom MatrixGenerics rowRanges
-#' @importMethodsFrom S4Vectors split mcols mcols<- values values<-
+#' @importMethodsFrom S4Vectors split mcols mcols<- values values<- with within
 #' @useDynLib Skilift, .registration=TRUE
 registerS3method(genname = "merge", class = "data.table", method = data.table::merge.data.table)
 "_PACKAGE"

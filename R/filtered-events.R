@@ -494,7 +494,17 @@ collect_gene_fusions <- function(fusions, pge, verbose = TRUE) {
 
   non_silent_fusions <- fus[silent == FALSE, ]
   unique_fusions <- non_silent_fusions[!duplicated(genes), ]
-  unique_fusions[, vartype := ifelse(in.frame == TRUE, "fusion", "outframe_fusion")]
+  vartype_values = ( function(x) {
+      if (is.null(x) || NROW(x) == 0) return("fusion")
+      out = data.table::fcase(
+        is.na(x) | nchar(x) == 0, "fusion",
+        x == TRUE, "inframe_fusion",
+        x == FALSE, "outframe_fusion"
+      )
+      return(out)
+  } )(unique_fusions[["in.frame"]])
+  unique_fusions[["vartype"]] = vartype_values
+  # unique_fusions[, vartype := ifelse(in.frame == TRUE, "inframe_fusion", "outframe_fusion")]
 
   split_genes <- function(genes) unlist(strsplit(genes, ","))
   gene_lengths <- function(genes) sapply(strsplit(genes, ","), length)
@@ -997,17 +1007,26 @@ collect_oncokb_cna <- function(oncokb_cna, jabba_gg, pge, amp.thresh, del.thresh
       c("Amplification", "amp")
   )
   is_valid_oncokb_cna = rep(FALSE, NROW(oncokb_cna))
+  
   for (match_lst in matches) {
+    ## FIXME: hack logic for homdel vs amp
       valid_gene = scna[
           ## scna$total_node_width > 1e3
-          scna$exon_frac > 0.9
-          & scna$type == match_lst[2],
-
+      (
+        scna$exon_frac > 0.9
+        & scna$type == match_lst[2]
+        & scna$type == "amp"
+      ) | (
+        scna$exon_frac > 0
+        & scna$type == match_lst[2]
+        & scna$type == "homdel"
+      ),
       ]$gene_name
       is_valid_oncokb_cna = (
           is_valid_oncokb_cna
           | (oncokb_cna$HUGO_SYMBOL %in% valid_gene & oncokb_cna$ALTERATION %in% match_lst[1])
       )
+      
   }
   oncokb_cna = oncokb_cna[is_valid_oncokb_cna,]
 
@@ -1073,13 +1092,28 @@ collect_oncokb_fusions <- function(oncokb_fusions, pge, cytoband, verbose = TRUE
     )
 
     non_silent_fusions <- oncokb_fusions[silent == FALSE, ] # already de-duped
-    non_silent_fusions[, vartype := ifelse(in.frame == TRUE, "fusion", "outframe_fusion")]
+    vartype_values = vartype_values = ( function(x) {
+      if (is.null(x) || NROW(x) == 0) return("fusion")
+      out = data.table::fcase(
+        is.na(x) | nchar(x) == 0, "fusion",
+        x == TRUE, "inframe_fusion",
+        x == FALSE, "outframe_fusion"
+      )
+      return(out)
+    } )(non_silent_fusions$in.frame)
+    non_silent_fusions[["vartype"]] = vartype_values
 
     if (!NROW(non_silent_fusions) > 0) {
       return(out)
     }
 
-    genes <- strsplit(non_silent_fusions$FUSION, "-")
+    nm = tolower(names(non_silent_fusions))
+    ixcol = which(nm %in% "fusion")
+    nr_ixcol = NROW(ixcol)
+    if (nr_ixcol > 1) ixcol = ixcol[1]
+    genes = non_silent_fusions[[ixcol]]
+    genes = gsub("[[:space:]]+fusion", "", genes)    
+    genes <- strsplit(genes, "-")
     genes_matrix <- do.call(rbind, genes)
     ixA <- match(genes_matrix[, 1], pge$gene_name)
     ixB <- match(genes_matrix[, 2], pge$gene_name)
@@ -1250,6 +1284,42 @@ parse_oncokb_tier <- function(
   return(oncokb)
 }
 
+maf_reconstruct_refalt = function(dt) {
+  is_ins = which(dt$Variant_Type == "INS")
+  is_del = which(dt$Variant_Type == "DEL")
+  clean_maf_allele = gsub("-", "", dt$Allele)
+  clean_maf_ref = gsub("-", "", dt$Reference_Allele)
+  fbp = dt$flanking_bps
+  is_fbp_blank = nchar(fbp) == 0
+  unflanked_bps = ifelse(
+    ! is_fbp_blank, 
+    substring(fbp, 2, nchar(fbp) - 1),
+    clean_maf_ref
+  )
+  is_xnp = which(nchar(clean_maf_allele) == nchar(clean_maf_ref))
+  is_other = setdiff(seq_len(NROW(dt)), c(is_ins, is_del, is_xnp))
+  vcf_ref_reconstructed = unflanked_bps
+  ## vcf_ref_reconstructed = character(NROW(dt))
+  ## vcf_ref_reconstructed[is_ins] = substring(clean_maf_allele[is_ins], 1, 1)
+  ## vcf_ref_reconstructed[is_del] = paste(
+  ##   clean_maf_allele[is_del],
+  ##   clean_maf_ref[is_del],
+  ##   sep = ""
+  ## )
+  ## vcf_ref_reconstructed[is_xnp] = clean_maf_ref[is_xnp]
+  vcf_alt_reconstructed = character(NROW(dt))
+  vcf_alt_reconstructed[is_ins] = clean_maf_allele[is_ins]
+  vcf_alt_reconstructed[is_del] = clean_maf_allele[is_del]
+  vcf_alt_reconstructed[is_xnp] = clean_maf_allele[is_xnp]
+  return(
+    list(
+      vcf_ref_reconstructed = vcf_ref_reconstructed,
+      vcf_alt_reconstructed = vcf_alt_reconstructed
+    )
+  )   
+}
+
+
 #' @title collect_oncokb
 #' @description
 #' Collects OncoKB mutation data from a specified file and processes it.
@@ -1267,14 +1337,14 @@ collect_oncokb <- function(oncokb_maf, multiplicity = NA_character_, verbose = T
   }
 
   # snpeff_ontology = readRDS(system.file("extdata", "data", "snpeff_ontology.rds", package = "Skilift"))
-  oncokb <- data.table::fread(oncokb_maf)
+  oncokb <- data.table::fread(oncokb_maf, colClasses = c("Chromosome" = "character"))
   is_multiplicity_present = is.character(multiplicity) && NROW(multiplicity) == 1 && !is_loosely_na(multiplicity) && file.exists(multiplicity)
   is_oncokb_populated = NROW(oncokb) > 0
-  
+
   is_multiplicity_populated = FALSE
   if (is_multiplicity_present) {
     multiplicity <- readRDS(multiplicity)
-	is_multiplicity_populated = NROW(multiplicity) > 0
+	  is_multiplicity_populated = NROW(multiplicity) > 0
   }
 
   if (is_oncokb_populated && !is_multiplicity_populated) {
@@ -1282,14 +1352,50 @@ collect_oncokb <- function(oncokb_maf, multiplicity = NA_character_, verbose = T
   }
   
   if (is_oncokb_populated && is_multiplicity_populated) {
+    oncokb = oncokb[
+      order(
+        GenomeInfoDb::rankSeqlevels(Chromosome),
+        vcf_pos
+      )
+    ]
+    oncokb$Chromosome = ifelse(oncokb$Chromosome == "", "na", oncokb$Chromosome)
+    lst = Skilift:::maf_reconstruct_refalt(oncokb)
+    oncokb$vcf_ref = lst$vcf_ref_reconstructed
+    oncokb$vcf_alt = lst$vcf_alt_reconstructed
+    order_ix_multiplicity = with(data = multiplicity, expr = {
+      order(
+        GenomeInfoDb::rankSeqlevels(as.character(seqnames)),
+        start
+      )
+    })
+    multiplicity = multiplicity[order_ix_multiplicity]
   	oncokb <- merge_oncokb_multiplicity(oncokb, multiplicity, overwrite = TRUE)
     oncokb = Skilift:::annotate_multihit(oncokb)
   }
 
+  for (col in c("segment_cn", "segment_cn_low", "segment_cn_high")) {
+    if (!col %in% names(oncokb)) {
+      oncokb[[col]] <- rep_len(NA, NROW(oncokb))
+    }
+  }
+
+  # if (is_oncokb_populated && ! is_multiplicity_populated) {
+  #   # oncokb$major.count = NA_integer_
+  #   # oncokb$minor.count = NA_integer_
+  #   # oncokb$major_snv_copies = NA_real_
+  #   # oncokb$minor_snv_copies = NA_real_
+  #   # oncokb$altered_copies = NA_real_
+  #   oncokb$segment_cn = NA_real_
+  #   oncokb$is_multi_hit_per_gene = NA
+  # }
+
   if (is_oncokb_populated) {
-    mat_vcf_id = stringr::str_split_fixed(oncokb$vcf_id, "_|/", n = 3)
-    vcf_ref = mat_vcf_id[,2]
-    vcf_alt = mat_vcf_id[,3]
+    lst = maf_reconstruct_refalt(oncokb)
+    vcf_ref = lst$vcf_ref_reconstructed
+    vcf_alt = lst$vcf_alt_reconstructed
+    # mat_vcf_id = stringr::str_split_fixed(oncokb$vcf_id, "_|/", n = 3)
+    # vcf_ref = mat_vcf_id[,2]
+    # vcf_alt = mat_vcf_id[,3]
     oncokb$vcf_ref = vcf_ref
     oncokb$vcf_alt = vcf_alt
     rm(mat_vcf_id)
@@ -1374,7 +1480,7 @@ collect_oncokb <- function(oncokb_maf, multiplicity = NA_character_, verbose = T
 
 
 
-merge_annotations = function(onco, annotated_vcf) {
+merge_annotations = function(onco, annotated_vcf, fields = Skilift:::echtvar_vcf_fields) {
   is_vcf_path = is.character(annotated_vcf) && length(annotated_vcf) == 1
   if (is_vcf_path && !all(file.exists(annotated_vcf))) stop("annotated_vcf path does not exist to merge with oncotable")
   if (is_vcf_path) {
@@ -1405,21 +1511,27 @@ merge_annotations = function(onco, annotated_vcf) {
   # )
   dtvcf = gUtils::gr2dt(vcf)
   # dtvcf$maf_alt = maf_alt
-  dtvcf[, vkey := paste(seqnames, start, maf_alt)]
+  # dtvcf[, vkey := paste(seqnames, start, maf_alt)]
   dtvcf[, vkey := paste(seqnames, start, ALT, sep = "-___-")]
   # data.table::setkey(dtvcf, vkey)
 
 
   for (col in names(dtvcf)) {
     is_list = inherits(dtvcf[[col]], c("list", "List"))
-    is_character = any(grepl("character", collapse::vclasses(dtvcf[[col]])))
+    is_atomic_character = ! is_list && is.character(dtvcf[[col]])
+    is_any_character = is_list && any(sapply(dtvcf[[col]], function(x) any(is.character(x))))
+    # is_character = any(grepl("character", collapse::vclasses(dtvcf[[col]])))
+    is_character = is_atomic_character || is_any_character
     if (!is_list) next
     if (!is_character) next
     dtvcf[[col]] = S4Vectors::unstrsplit(dtvcf[[col]])
   }
   
 
-  onco = onco[order(factor(Chromosome, c(1:22, "X", "Y", "M", "MT")), vcf_pos)]
+  onco = onco[order(
+    GenomeInfoDb::rankSeqlevels(Chromosome), 
+    vcf_pos
+  )]
 
   onco$IX = seq_len(NROW(onco))
 
@@ -1428,7 +1540,7 @@ merge_annotations = function(onco, annotated_vcf) {
     onco,
     base::subset(
       dtvcf,
-      select = c("vkey", Skilift:::echtvar_vcf_fields)
+      select = c("vkey", fields)
     ),
     all.x = TRUE,
     by = "vkey",
@@ -1448,7 +1560,7 @@ merge_annotations = function(onco, annotated_vcf) {
 
 }
 
-is_oncotable_annotated = function(ot) {
+is_oncotable_echtvar_annotated = function(ot) {
   is_data_table = inherits(ot, "data.table") || inherits(ot, "data.frame")
   if (!is_data_table) return(NA)
 
@@ -1468,13 +1580,17 @@ annotation_template = list(
     
 
 parse_echtvar_oncotable = function(ot) {
-  if (!Skilift:::is_oncotable_annotated(ot)) return(ot)
+  if (!Skilift:::is_oncotable_echtvar_annotated(ot)) return(ot)
   ## data.table::fcase(
   ##   grepl("benign", ot$clinvar_ONC
   ##   ot$clinvar_ONC %in% c("Oncogenic", "Likely_oncogenic")
 
   is_benign_onc_clinvar = grepl("benign", ot$clinvar_ONC, ignore.case = TRUE)
   is_pathogenic_onc_clinvar = grepl("pathogenic", ot$clinvar_ONC, ignore.case = TRUE)
+  is_missing = (
+      ot$clinvar_ONC %in% c("MISSING", "UNKNOWN", ".")
+      & ot$clinvar_CLNDN %in% c("MISSING", "UNKNOWN", ".")
+  )
   is_cancer_related = grepl(
     glue::glue(
       '(',
@@ -1505,27 +1621,33 @@ parse_echtvar_oncotable = function(ot) {
   selection_string = data.table::fcase(
     is_benign_onc_clinvar, "Benign (Onc)",
     is_pathogenic_onc_clinvar, "Oncogenic",
+    is_missing, "Not in Clinvar",
     !is_cancer_related, "Not Cancer Related",
+    is_conflicting, "Conflicting pathogenicity",
     is_benign, "Benign",
     is_pathogenic, "Pathogenic",
     default = NA_character_
   )
   code = data.table::fcase(
-    selection_string == "Benign (Onc)", 0L,
-    selection_string == "Oncogenic", 10L,
-    selection_string == "Not Cancer Related", -1L,
-    selection_string == "Benign", 0L,
-    selection_string == "Pathogenic", 10L,
-    default = -1L
+    selection_string == "Benign (Onc)", "benign",
+    selection_string == "Oncogenic", "pathogenic",
+    selection_string == "Not in Clinvar", "na",
+    selection_string == "Not Cancer Related", "na",
+    selection_string == "Conflicting pathogenicity", "na",
+    selection_string == "Benign", "benign",
+    selection_string == "Pathogenic", "pathogenic",
+    default = "na"
   )
 
   template_clinvar = Skilift::copy(annotation_template)
 
+
+
   clinvar_dt = data.table(
-    title = "Clinvar",
-    code = code,
+    # title = "Clinvar",
+    class = code,
     score = -1,
-    display = selection_string
+    desc = selection_string
   )
   clinvar_dt[, IX := seq_len(.N)]
   tlst_clinvar = clinvar_dt[, list(dt = list(list(as.list(.SD)))), by = IX]
@@ -1544,27 +1666,27 @@ parse_echtvar_oncotable = function(ot) {
   is_snv = vtype == "SNV"
 
   am_pred = c(
-    "LP" = "Pathogenic",
+    "LP" = "Likely Pathogenic",
     "P" = "Pathogenic",
     "B" = "Benign",
-    "LB" = "Benign",
+    "LB" = "Likely Benign",
     "A" = "Ambiguous",
     "MISSING" = "Missing",
     "." = "Missing"
   )[ot$dbNSFP_AlphaMissense_pred]
 
   code = data.table::fcase(
-    !vtype == "SNV", -1L,
-    am_pred == "Pathogenic", 10L,
-    am_pred == "Benign", 0L,
-    default = -1L
+    !vtype == "SNV", "na",
+    am_pred %in% c("Pathogenic", "Likely Pathogenic"), "pathogenic",
+    am_pred %in% c("Benign", "Likely Benign"), "benign",
+    default = "na"
   )
   
   am_dt = data.table(
-    title = "AlphaMissense",
-    code = code,
+    # title = "AlphaMissense",
+    class = code,
     score = ot$dbNSFP_AlphaMissense_score,
-    display = am_pred,
+    desc = am_pred,
     is_snv = is_snv
   )
 
@@ -1590,17 +1712,17 @@ parse_echtvar_oncotable = function(ot) {
   )[ot$dbNSFP_SIFT_pred]
 
   code = data.table::fcase(
-    !vtype == "SNV", -1L,
-    grepl("damaging", sift_pred, ignore.case = TRUE), 10L,
-    sift_pred == "Tolerated", 0L,
-    default = -1L
+    !vtype == "SNV", "na",
+    grepl("damaging", sift_pred, ignore.case = TRUE), "pathogenic",
+    sift_pred == "Tolerated", "benign",
+    default = "na"
   )
   
   sift_dt = data.table(
-    title = "SIFT",
-    code = code,
+    # title = "SIFT",
+    class = code,
     score = ot$dbNSFP_SIFT_score,
-    display = sift_pred,
+    desc = sift_pred,
     is_snv = is_snv
   )
 
@@ -1627,17 +1749,17 @@ parse_echtvar_oncotable = function(ot) {
   )[ot$dbNSFP_Polyphen2_HVAR_pred]
 
   code = data.table::fcase(
-    !vtype == "SNV", -1L,
-    grepl("damaging", pphen_pred, ignore.case = TRUE), 10L,
-    pphen_pred == "Benign", 0L,
-    default = -1L
+    !vtype == "SNV", "missing",
+    grepl("damaging", pphen_pred, ignore.case = TRUE), "pathogenic",
+    pphen_pred == "Benign", "benign",
+    default = "na"
   )
   
   pphen_dt = data.table(
-    title = "Polyphen2 HVAR",
-    code = code,
+    # title = "Polyphen2 HVAR",
+    class = code,
     score = ot$dbNSFP_Polyphen2_HVAR_score,
-    display = pphen_pred,
+    desc = pphen_pred,
     is_snv = is_snv
   )
 
@@ -1667,33 +1789,68 @@ parse_echtvar_oncotable = function(ot) {
     )
   )
   nms = names(tlst_mg)
-  rename_ix = seq(from = 2, to = NROW(nms), length.out = NROW(nms))
+  rename_ix = seq(from = 2L, to = NROW(nms), by = 1L)
   nms[
     rename_ix
   ] = c("clinvar", "am", "sift", "pphen")
   names(tlst_mg) = nms
-  tlst_final = tlst_mg[,
-  {
-    ENV = environment()
-    main = function() {
-      force(.SD)
-      lst_of_lst = base::mget(
-        c(
-          "clinvar",
-          "am",
-          "sift",
-          "pphen"
-        ),
-        envir = ENV
-      )
-      lst_of_lst = unname(lst_of_lst)
-      out_lst = do.call(c, unlist(lst_of_lst, recursive = FALSE))
-      return(list(out_lst = list(out_lst)))
-    }
-    main()
-  },  by = IX ]
 
-  ot[["echtvar_fields"]] = tlst_final$out_lst
+  # browser()
+  ## tlst_final = tlst_mg[,
+  ## {
+  ##   ENV = environment()
+  ##   main = function() {
+  ##     force(.SD)
+  ##     lst_of_lst = base::mget(
+  ##       c(
+  ##         "clinvar",
+  ##         "am",
+  ##         "sift",
+  ##         "pphen"
+  ##       ),
+  ##       envir = ENV
+  ##     )
+  ##     lst_of_lst = unname(lst_of_lst)
+  ##     out_lst = do.call(c, unlist(lst_of_lst, recursive = FALSE))
+  ##     return(list(out_lst = list(out_lst)))
+  ##   }
+  ##   main()
+  ## },  by = IX ]
+
+  rename = c(
+      "am" = "AlphaMissense",
+      "sift" = "SIFT",
+      "pphen" = "Polyphen2_HVAR",
+      "clinvar" = "Clinvar"
+  )
+
+  ## ot[["echtvar_fields"]] = tlst_final$out_lst
+
+
+  for (j in seq_len(NROW(rename))) {
+      nm_map = rename[j]
+      ## valx = unlist(tlst_mg[[names(nm_map)]], recursive = FALSE)
+      valx = tlst_mg[[names(nm_map)]]
+      df = mclapply(
+        X = valx, 
+        FUN = function(x) {
+          nr = NROW(x)
+          if (nr > 0) {
+            z = data.frame(x, stringsAsFactors = FALSE)
+            ## class(z) = "data.frame"
+            ## attr(z, "row.names") = base::.set_row_names(nr)
+            return(jsonlite::unbox(z))
+          }
+          return(NULL)
+        }
+      )
+      ot[[nm_map]] = df
+  }
+
+
+
+  is_space_in_nms = any(grepl(" ", names(ot)))
+  if (is_space_in_nms) stop("wtf")
   
   return(ot)
 }
@@ -1732,7 +1889,9 @@ oncotable <- function(
     verbose = TRUE,
     amp.thresh = 4,
     filter = "PASS",
-    del.thresh = 0.5) {
+    del.thresh = 0.5,
+    somatic_variant_annotations_fields = Skilift:::echtvar_vcf_fields
+    ) {
   out <- data.table()
 
   if ("type" %in% names(mcols(gencode))) {
@@ -1803,21 +1962,51 @@ oncotable <- function(
     )
   }
 
-  is_echtvar_vcf_present = (
+  is_vcf_present = (
     !is.null(somatic_variant_annotations) 
     && !any(is.na(somatic_variant_annotations)) 
     && all(file.exists(somatic_variant_annotations)) 
-    && all(grepl("echtvar", somatic_variant_annotations))
   )
+
+  ## is_echtvar_vcf_present = is_vcf_present && all(grepl("echtvar", somatic_variant_annotations))
+
+  ## if (is_echtvar_vcf_present) {
+  ##   ## Added redundancy just in case the fields that get fed in don't contain the canonical nf-gos echtvar annotated fields
+  ##   somatic_variant_annotations_fields = c(somatic_variant_annotations_fields, Skilift:::echtvar_vcf_fields)
+  ##   somatic_variant_annotations_fields = unique(somatic_variant_annotations_fields)
+  ## }
 
   are_small_variants_populated = (
     NROW(out$type) > 0
     && any(out$track %in% "variants")
   )
 
-  if (is_echtvar_vcf_present && are_small_variants_populated) {
+  are_somatic_variant_annotations_fields_in_vcf = FALSE
+  if (is_vcf_present) {
+    vcfheader = VariantAnnotation::scanVcfHeader(somatic_variant_annotations)
+    fields_info = rownames(VariantAnnotation::info(vcfheader))
+    fields_geno = rownames(VariantAnnotation::geno(vcfheader))
+    fields_to_pass = unique(
+      c(
+        Skilift:::echtvar_vcf_fields, ## redundancy to ensure these are added by default
+        intersect(fields_info, somatic_variant_annotations_fields),
+        intersect(fields_geno, somatic_variant_annotations_fields)
+      )
+    )
+    for (field in setdiff(somatic_variant_annotations_fields, fields_to_pass)) {
+      message(paste("field", field, "not found in vcf"))
+    }
+    somatic_variant_annotations_fields = fields_to_pass
+    are_somatic_variant_annotations_fields_in_vcf = NROW(somatic_variant_annotations_fields) > 0
+  }
+
+  if (is_vcf_present && are_small_variants_populated && are_somatic_variant_annotations_fields_in_vcf) {
     ## merge echtvar
-    out <- merge_annotations(out, somatic_variant_annotations)
+    out <- Skilift:::merge_annotations(
+      onco = out, 
+      annotated_vcf = somatic_variant_annotations, 
+      fields = somatic_variant_annotations_fields
+    )
   }
 
   ## add gene locations
@@ -1866,7 +2055,8 @@ create_oncotable <- function(
     gencode = Skilift::get_default_gencode(),
     cytoband = system.file("extdata", "data", "cytoband.rds", package = "Skilift"),
     outdir,
-    cores = 1) {
+    cores = 1,
+    somatic_variant_annotations_fields = Skilift:::echtvar_vcf_fields) {
   if (!inherits(cohort, "Cohort")) {
     stop("Input must be a Cohort object")
   }
@@ -1904,89 +2094,84 @@ create_oncotable <- function(
   if (!"oncotable" %in% names(updated_cohort$inputs)) {
     updated_cohort$inputs[, oncotable := NA_character_]
   }
+  # browser()
 
   jabba_column = Skilift::DEFAULT_JABBA(object = cohort)
 
   futile.logger::flog.threshold("ERROR")
   iterfun = function(i) {
-    tryCatchLog(
-      {
-        row <- cohort$inputs[i]
+    main = function() {
+      row <- cohort$inputs[i]
 
-        # Create output directory for this pair
-        pair_outdir <- file.path(outdir, row$pair)
-        if (!dir.exists(pair_outdir)) {
-          dir.create(pair_outdir, recursive = TRUE)
-        }
+      # Create output directory for this pair
+      pair_outdir <- file.path(outdir, row$pair)
+      if (!dir.exists(pair_outdir)) {
+        dir.create(pair_outdir, recursive = TRUE)
+      }
 
-        # Get ploidy from jabba output, default to 2 if missing
-        ploidy <- 2 # Default ploidy
-        if (file.exists(row[[jabba_column]])) {
-          ploidy_ggraph <- tryCatch(
-            {
-              process_jabba(row[[jabba_column]])
-            },
-            error = function(e) {
-              msg <- sprintf("Error reading JaBbA file for %s: %s. Using default ploidy of 2.", row$pair, e$message)
-              warning(msg)
-            }
-          )
-
-          if (!is.null(ploidy_ggraph)) {
-            ploidy <- ifelse(
-              !is.null(ploidy_ggraph$meta$ploidy),
-              ploidy_ggraph$meta$ploidy,
-              ploidy_ggraph$ploidy
-            )
-          }
-        }
-
-        # amp_thresh <- amp_thresh_multiplier * ploidy
-        amp_thresh = amp_thresh_multiplier
-        message(paste("Processing", row$pair, "using amp.thresh of", amp_thresh))
-
-
-        # Run oncotable for this pair
-        futile.logger::flog.threshold("ERROR")
-        oncotable_result <- tryCatchLog(
+      # Get ploidy from jabba output, default to 2 if missing
+      ploidy <- 2 # Default ploidy
+      jabba_path = row[[jabba_column]]
+      if (!is.null(jabba_path) && all(file.exists(jabba_path))) {
+        ploidy_ggraph <- tryCatch(
           {
-            oncotable(
-              pair = row[["pair"]],
-              somatic_variant_annotations = row[["somatic_variant_annotations"]],
-              fusions = row[["fusions"]], 
-              jabba_gg = row[[jabba_column]],
-              karyograph = row[["karyograph"]],
-              events = row[["events"]],
-              signature_counts = row[["signature_counts"]],
-              multiplicity = row[["multiplicity"]],
-              oncokb_snv = row[["oncokb_snv"]],
-              oncokb_cna = row[["oncokb_cna"]],
-              oncokb_fusions = row[["oncokb_fusions"]],
-              gencode = gencode,
-              cytoband = cytoband,
-              verbose = TRUE,
-              amp.thresh = amp_thresh,
-              filter = "PASS",
-              del.thresh = 0.5
-            )
+            process_jabba(row[[jabba_column]])
           },
           error = function(e) {
-            print(sprintf("Error in oncotable for %s: %s", row$pair, e$message))
-            NULL
+            msg <- sprintf("Error reading JaBbA file for %s: %s. Using default ploidy of 2.", row$pair, e$message)
+            warning(msg)
           }
         )
 
-        if (!is.null(oncotable_result)) {
-          # Save successful results
-          oncotable_path <- file.path(pair_outdir, "oncotable.rds")
-          saveRDS(oncotable_result, oncotable_path)
-          fwrite(oncotable_result, file.path(pair_outdir, "oncotable.txt"))
-          return(list(index = i, path = oncotable_path))
+        if (!is.null(ploidy_ggraph)) {
+          ploidy <- ifelse(
+            !is.null(ploidy_ggraph$meta$ploidy),
+            ploidy_ggraph$meta$ploidy,
+            ploidy_ggraph$ploidy
+          )
         }
-      },
+      }
+
+      # amp_thresh <- amp_thresh_multiplier * ploidy
+      amp_thresh = amp_thresh_multiplier
+      message(paste("Processing", row$pair, "using amp.thresh of", amp_thresh))
+
+
+      # Run oncotable for this pair
+      oncotable_result <- oncotable(
+        pair = row[["pair"]],
+        somatic_variant_annotations = row[["somatic_variant_annotations"]],
+        fusions = row[["fusions"]], 
+        jabba_gg = row[[jabba_column]],
+        karyograph = row[["karyograph"]],
+        events = row[["events"]],
+        signature_counts = row[["signature_counts"]],
+        multiplicity = row[["multiplicity"]],
+        oncokb_snv = row[["oncokb_snv"]],
+        oncokb_cna = row[["oncokb_cna"]],
+        oncokb_fusions = row[["oncokb_fusions"]],
+        gencode = gencode,
+        cytoband = cytoband,
+        verbose = TRUE,
+        amp.thresh = amp_thresh,
+        filter = "PASS",
+        del.thresh = 0.5,
+        somatic_variant_annotations_fields = somatic_variant_annotations_fields
+      )
+
+      if (!is.null(oncotable_result)) {
+        # Save successful results
+        oncotable_path <- file.path(pair_outdir, "oncotable.rds")
+        saveRDS(oncotable_result, oncotable_path)
+        fwrite(oncotable_result, file.path(pair_outdir, "oncotable.txt"))
+        return(list(index = i, path = oncotable_path))
+      }
+    }
+    tryCatchLog(
+      main(),
       error = function(e) {
         print(sprintf("Unexpected error processing %s: %s", cohort$inputs[i]$pair, e$message))
-        NULL
+        return(NULL)
       }
     )
   }
@@ -2023,7 +2208,9 @@ create_filtered_events <- function(
     jabba_gg,
     out_file,
     return_table = FALSE,
-    cohort_type = "paired") {
+    cohort_type = "paired",
+    additional_columns = NULL
+    ) {
   ot <- readRDS(oncotable)
 
   possible_drivers = empty_oncotable = structure(list(gene = character(0), gene_summary = character(0), 
@@ -2071,6 +2258,70 @@ create_filtered_events <- function(
         "is_multi_hit_per_gene" = "is_multi_hit_per_gene",
         "echtvar_fields" = "tertiary_field"
     )
+
+    if (!is.null(additional_columns)) {
+      is_list = inherits(additional_columns, "list")
+      is_json_schema = FALSE
+      if (is_list) {
+        has_json_schema_fields = sapply(
+          X = additional_columns, 
+          FUN = function(x) {
+            all(c("id", "title", "dataIndex") %in% names(x))
+          }
+        )
+        is_json_schema = all(has_json_schema_fields)
+      }
+      if (is_json_schema) {
+        IX = seq_len(NROW(additional_columns))
+        lst = gGnome::transpose(lapply(
+          X = IX, 
+          FUN = function(ii) {
+            x = additional_columns[ii]
+            name_in_json = names(x)
+            y = x[[1]]
+            if (is.null(name_in_json)) {
+              name_in_json = y[["dataIndex"]]
+            }
+            added_colnms = y[["dataIndex"]]
+            viewType = y[["viewType"]]
+            list(
+              added_colnms = added_colnms,
+              name_in_json = name_in_json,
+              viewType = viewType
+            )
+          }
+        ), ffun = c)
+        added_colnms = lst$added_colnms
+        name_in_json_vector = gsub("[[:space:]]+", "_", lst$name_in_json, perl = TRUE)
+        viewType = lst$viewType
+        # dt_schema = data.table::data.table(
+        #   added_colnms,
+        #   name_in_json = name_in_json_vector,
+        #   viewType
+        # )
+      } else {
+        added_colnms = names(additional_columns)
+        if (is.null(added_colnms)) {
+          added_colnms = additional_columns
+        }
+        added_colnms = ifelse(
+          is.na(added_colnms) | added_colnms == "", 
+          additional_columns, 
+          added_colnms
+        )
+      }
+      for (j in seq_len(NROW(additional_columns))) {
+        if (is_json_schema) {
+          name_in_json = name_in_json_vector[j]
+        } else if (is_list) {
+          name_in_json = additional_columns[[j]]
+        } else {
+          name_in_json = additional_columns[j]
+        }
+        col = added_colnms[j]
+        oncotable_col_to_filtered_events_col[col] <- name_in_json
+      }
+    }
 
 
   res.final = Skilift:::change_names(possible_drivers, oncotable_col_to_filtered_events_col)
@@ -2159,7 +2410,8 @@ create_filtered_events <- function(
     res.fus = res[type == "fusion",] ## need to deal each class explicitly
     if (NROW(res.fus) > 0) {
       res.fus$gene = res.fus$fusion_genes
-      is_inframe = res.fus$vartype == "fusion"
+      is_noframe = res.fus$vartype == "fusion"
+      is_inframe = res.fus$vartype == "inframe_fusion"
       is_outframe = res.fus$vartype == "outframe_fusion"
       ## If variant.p isn't found
       ## i.e. OncoKB isn't updated
@@ -2170,16 +2422,14 @@ create_filtered_events <- function(
         as.environment(as.list(res.fus)),
         ifnotfound = rep_len("", NROW(res.fus))
       )
-      fus_frame_label = ifelse(
-        is_inframe,
-        "In-Frame Fusion",
-        ifelse(
-          is_outframe,
-          "Out-of-Frame Fusion",
-          NA_character_
-        )
+      fus_frame_label = data.table::fcase(
+        is_inframe, "In-Frame Fusion",
+        is_outframe, "Out-of-Frame Fusion",
+        is_noframe, "Fusion",
+        default = NA_character_
       )
-      if (any(is.na(fus_frame_label))) stop("A fusion was not labeled as in-frame or out-of-frame")
+      # fus_frame_label
+      if (any(is.na(fus_frame_label))) stop("A fusion was not labeled as inframe, outframe, or noframe")
       variant_label = paste(
           fus_frame_label,
           variant.p.fus
@@ -2247,10 +2497,25 @@ create_filtered_events <- function(
       res.cn.dt[, c("min_cn", "cn", "cn.high", "cn.low", "width", "strand") := NULL]
     }
     res.complex = res[type == "Complex SV"]
-    if (NROW(res.complex) > 0) {
+    has_complex = NROW(res.complex) > 0
+    ## initial pass to determine if anything is worth showing (non decoy chrom)
+    if (has_complex) {
       loc_complex = res.complex[["Genome_Location"]]
       loc_complex = gsub(";", ",", loc_complex)
       grl_footprint = gUtils::parse.grl(loc_complex)
+      snm = GenomeInfoDb::seqnames(grl_footprint)
+      stdchrom = GenomeInfoDb::standardChromosomes(snm)
+      is_snm_in_stdchrom = S4Vectors::`%in%`(snm, stdchrom)
+      grl_footprint_subset = grl_footprint[is_snm_in_stdchrom]
+      numelem = S4Vectors::elementNROWS(grl_footprint_subset)
+      is_all_grl_in_stdchrom = numelem > 0
+      ## has_complex = any(is_all_grl_in_stdchrom)
+      grl_footprint = grl_footprint_subset[is_all_grl_in_stdchrom]
+      res.complex = res.complex[is_all_grl_in_stdchrom]
+      has_complex = NROW(res.complex) > 0
+    }
+    if (has_complex) {
+      
       grlfp_1mb = GenomicRanges::reduce(grl_footprint + 0.5e6)
       grlfp_5mb = GenomicRanges::reduce(grl_footprint + 2.5e6)
       grlfp_10mb = GenomicRanges::reduce(grl_footprint + 5e6)
@@ -2346,11 +2611,20 @@ create_filtered_events <- function(
     ## Note that return_table for debugging purposes as well.
 
   }
-  jsonlite::write_json(res.final, out_file, pretty = TRUE)
+
+  jsonlite::write_json(
+    res.final, 
+    out_file, 
+    pretty = TRUE, 
+    auto_unbox = TRUE
+  )
+
   if (return_table) {
       return(res.final)
   }
 }
+
+
 
 
 #' @name lift_filtered_events
@@ -2363,96 +2637,114 @@ create_filtered_events <- function(
 #' @param cores Number of cores for parallel processing (default: 1)
 #' @return None
 #' @export
-lift_filtered_events <- function(cohort, output_data_dir, cores = 1, return_table = TRUE) {
-    if (!inherits(cohort, "Cohort")) {
-        stop("Input must be a Cohort object")
-    }
+lift_filtered_events <- function(
+  cohort, 
+  output_data_dir, 
+  cores = 1, 
+  return_table = TRUE,
+  additional_columns = Skilift:::default_echtvar_json_fields,
+  show_all_tags = FALSE,
+  show_all_small_muts_tags = FALSE,
+  show_all_cna_tags = FALSE,
+  show_all_svs_tags = FALSE
+) {
+  if (!inherits(cohort, "Cohort")) {
+      stop("Input must be a Cohort object")
+  }
+  
+  if (!dir.exists(output_data_dir)) {
+      dir.create(output_data_dir, recursive = TRUE)
+  }
+  
+  # Validate required columns exist
+  # required_cols <- c("pair", "oncotable", "jabba_gg")
+  jabba_column = Skilift::DEFAULT_JABBA(object = cohort)
+  required_cols <- c("pair", "oncotable", jabba_column)
+  missing_cols <- required_cols[!required_cols %in% names(cohort$inputs)]
+  if (length(missing_cols) > 0) {
+    print(
+      paste(
+        "Missing required columns in cohort:",
+        paste(missing_cols, collapse = ", "),
+        collapse = ""
+      )
+    )
+  }
     
-    if (!dir.exists(output_data_dir)) {
-        dir.create(output_data_dir, recursive = TRUE)
+  cohort_type = cohort$type
+  # Create a copy of the cohort to modify
+  # Add oncotable column if it doesn't exist
+  if (!"string_summary" %in% names(cohort$inputs)) {
+    cohort$inputs[, string_summary := ""]
+  }
+
+  # Process each sample in parallel
+  futile.logger::flog.threshold("ERROR")
+  iterate_fun = function(i) {
+    main = function() {
+      row <- cohort$inputs[i,]
+      pair_dir <- file.path(output_data_dir, row$pair)
+      
+      if (!dir.exists(pair_dir)) {
+          dir.create(pair_dir, recursive = TRUE)
+      }
+      
+      out_file <- file.path(pair_dir, "filtered.events.json")
+      highlights_out_file <- file.path(pair_dir, "highlights.json")
+
+      out = NULL
+      string_summary = ""
+
+      out <- create_filtered_events(
+        pair = row$pair,
+        oncotable = row$oncotable,
+        jabba_gg = row[[jabba_column]],
+        out_file = out_file,
+        return_table = return_table,
+        cohort_type = cohort_type,
+        additional_columns = additional_columns
+      )
+      if (identical(cohort_type, "heme")) {
+        create_heme_highlights(
+          events_tbl = out,
+          jabba_gg = row[[jabba_column]],
+          out_file = highlights_out_file,
+          tumor_type = row$tumor_type,
+          cohorttuple = row
+        )
+      }
+      string_summary = create_summary(
+        events_tbl = out,
+        cohort_type = cohort_type,
+        cohorttuple = row,
+        show_all = show_all_tags,
+        show_all_small_muts_tags = show_all_small_muts_tags,
+        show_all_cna_tags = show_all_cna_tags,
+        show_all_svs_tags = show_all_svs_tags
+      )
+      return(
+        list(
+          pair = row$pair,
+          string_summary = string_summary
+        )
+      )
     }
-    
-    # Validate required columns exist
-    # required_cols <- c("pair", "oncotable", "jabba_gg")
-	jabba_column = Skilift::DEFAULT_JABBA(object = cohort)
-	required_cols <- c("pair", "oncotable", jabba_column)
-    missing_cols <- required_cols[!required_cols %in% names(cohort$inputs)]
-    if (length(missing_cols) > 0) {
-        print("Missing required columns in cohort: ", paste(missing_cols, collapse = ", "))
-    }
-    
-    cohort_type = cohort$type
-	
-	# Create a copy of the cohort to modify
-
-	# Add oncotable column if it doesn't exist
-	if (!"string_summary" %in% names(cohort$inputs)) {
-		cohort$inputs[, string_summary := ""]
-	}
-
-    # Process each sample in parallel
-    iterate_fun = function(i) {
-        row <- cohort$inputs[i,]
-        pair_dir <- file.path(output_data_dir, row$pair)
-        
-        if (!dir.exists(pair_dir)) {
-            dir.create(pair_dir, recursive = TRUE)
-        }
-        
-        out_file <- file.path(pair_dir, "filtered.events.json")
-        highlights_out_file <- file.path(pair_dir, "highlights.json")
-
-        out = NULL
-		string_summary = ""
-        futile.logger::flog.threshold("ERROR")
-        tryCatchLog({
-            out <- create_filtered_events(
-                pair = row$pair,
-                oncotable = row$oncotable,
-                jabba_gg = row[[jabba_column]],
-                out_file = out_file,
-                return_table = return_table,
-                cohort_type = cohort_type
-            )
-            if (identical(cohort_type, "heme")) {
-              create_heme_highlights(
-                events_tbl = out,
-                jabba_gg = row[[jabba_column]],
-                out_file = highlights_out_file,
-                tumor_type = row$tumor_type,
-                cohorttuple = row
-              )
-            }
-			string_summary = create_summary(
-				events_tbl = out,
-				cohort_type = cohort_type,
-        cohorttuple = row
-			)
-        }, error = function(e) {
-            print(sprintf("Error processing %s: %s", row$pair, e$message))
-            NULL
-        })
-
-        # return(out)
-		return(
-			list(
-				pair = row$pair,
-				string_summary = string_summary
-			)
-		)
-    }
-    results = mclapply(seq_len(nrow(cohort$inputs)), iterate_fun, mc.cores = cores, mc.preschedule = TRUE)
-
-	results = results[!sapply(results, is.null)]
-
-	if (NROW(results) > 0) {
-		# Transpose the list
-		results = do.call(Map, c(f = c, results))
-        setkey(cohort, pair)
-		cohort$inputs[results$pair, string_summary := results$string_summary]
-	}
-
-	return(cohort)
+    tryCatchLog({
+      main()
+    }, error = function(e) {
+      print(sprintf("Error processing %s: %s", row$pair, e$message))
+      NULL
+    })
+  }
+  results = mclapply(seq_len(nrow(cohort$inputs)), iterate_fun, mc.cores = cores, mc.preschedule = TRUE)
+  results = results[!vapply(results, is.null, FALSE)]
+  if (NROW(results) > 0) {
+    # Transpose the list
+    results = do.call(Map, c(f = c, results))
+    setkey(cohort, pair)
+    cohort$inputs[results$pair, string_summary := results$string_summary][]
+  }
+  return(cohort)
 }
 
 #' Select Heme events from Addy's hemedb
@@ -2513,6 +2805,20 @@ merge_oncokb_multiplicity <- function(
     oncokb <- data.table::fread(oncokb)
   } else if (is_oncokb_rds) {
     oncokb <- readRDS(oncokb)
+  }
+  is_gr_oncokb = inherits(oncokb, "GRanges")
+  is_dt_oncokb = inherits(oncokb, "data.frame")
+  is_chromosome_col_present = (
+      is_gr_oncokb && all("Chromosome" %in% colnames(S4Vectors::mcols(oncokb)))
+      ||
+      is_dt_oncokb && all("Chromosome" %in% names(oncokb))
+  )
+  if (is_chromosome_col_present) {
+      oncokb$Chromosome = ifelse(oncokb$Chromosome == "", "na", oncokb$Chromosome)
+  } else if (is_gr_oncokb) {
+      sl = GenomeInfoDb::seqlevels(oncokb)
+      GenomeInfoDb::seqlevelsStyle(sl) = "NCBI"
+      GenomeInfoDb::seqlevels(oncokb) = sl
   }
 
   is_character_mult = is.character(multiplicity)
@@ -2579,19 +2885,92 @@ merge_oncokb_multiplicity <- function(
   # (columns are always there)
   columns_to_assign_na_in_oncokb = cols.keep[!cols.keep %in% names(oncokb)] 
   if (is_oncokb_empty || is_multiplicity_empty)  {
-	for (col in columns_to_assign_na_in_oncokb) {
-		oncokb[[col]] = rep_len(NA, NROW(oncokb))
-	}
-	return(oncokb) ## Should be returned as original empty data.table + multiplicity columns (na'd for downstream robustness)
+    for (col in columns_to_assign_na_in_oncokb) {
+      oncokb[[col]] = rep_len(NA, NROW(oncokb))
+    }
+    return(oncokb) ## Should be returned as original empty data.table + multiplicity columns (na'd for downstream robustness)
+  }
+  
+  gr_multiplicity$vkey = with(as.data.frame(gr_multiplicity), paste(seqnames, start, REF, ALT))
+  mc_oncokb = S4Vectors::mcols(gr_oncokb)
+  if (is.null(mc_oncokb$vcf_ref) || is.null(mc_oncokb$vcf_alt)) {
+    lst = Skilift:::maf_reconstruct_refalt(gr_oncokb)
+    vcf_ref = lst$vcf_ref_reconstructed
+    vcf_alt = lst$vcf_alt_reconstructed
+    gr_oncokb$vcf_ref = vcf_ref
+    gr_oncokb$vcf_alt = vcf_alt
   }
 
-  ov <- gUtils::gr.findoverlaps(gr_oncokb, gr_multiplicity, by = c("gene", "ALT"), type = "equal")
-  ovQuery <- data.table(query.id = integer(0), subject.id = integer(0))
-  if (NROW(ov) > 0) {
-    ovQuery <- gUtils::gr2dt(ov)[, .(query.id, subject.id)]
-  }
-  missingIds <- setdiff(1:NROW(gr_oncokb), ov$query.id)
+  gr_oncokb$vkey = with(as.data.frame(gr_oncokb), paste(seqnames, vcf_pos, vcf_ref, vcf_alt))
 
+  uvkey_oncokb = split(seq_len(NROW(gr_oncokb)), gr_oncokb$vkey)
+  uvkey_mult = split(seq_len(NROW(gr_multiplicity)), gr_multiplicity$vkey)
+  uvkey_mult = data.table(
+      vkey = names(uvkey_mult),
+      uvkey_mult
+  )
+  uvkey_oncokb = data.table(
+      vkey = names(uvkey_oncokb),
+      uvkey_oncokb
+  )
+  all_mg = merge(uvkey_oncokb, uvkey_mult, by = "vkey", all = TRUE)
+  all_mg$count_x = S4Vectors::elementNROWS(all_mg$uvkey_oncokb)
+  all_mg$count_y = S4Vectors::elementNROWS(all_mg$uvkey_mult)
+  all_mg_matched = all_mg[ ! (count_x != 1 | count_y != 1) ]
+  all_mg_overmatched = all_mg[  (count_x > 1 | count_y > 1) ]
+  all_mg_overmatched = all_mg_overmatched[, {
+    main = function() {
+      nr = NROW(.SD)
+      if (nr == 0) return(NULL)
+      nr_oncokb = NROW(uvkey_oncokb)
+      uvkey_oncokb = list(uvkey_oncokb[[1]][1])
+      uvkey_mult = list(uvkey_mult[[1]][1])
+      return(
+        tibble::lst(
+          uvkey_oncokb,
+          uvkey_mult,
+          count_x,
+          count_y
+        )
+      )
+    }
+    main()
+  }, by = vkey]
+  all_mg_matched = rbind(all_mg_overmatched, all_mg_matched, fill = TRUE)
+
+  all_mg_matched$uvkey_oncokb = unlist(all_mg_matched$uvkey_oncokb)
+  all_mg_matched$uvkey_mult = unlist(all_mg_matched$uvkey_mult)
+  
+  ovQuery = data.table(query.id = integer(0), subject.id = integer(0))
+  if (NROW(all_mg_matched) > 0) {
+      ovQuery = data.table(
+          query.id = all_mg_matched$uvkey_oncokb,
+          subject.id = all_mg_matched$uvkey_mult
+      )
+  }
+  missing_mg = all_mg[ (count_x == 0 & count_y == 0) ]
+  missingIds = setdiff(seq_len(NROW(gr_oncokb)), ovQuery$query.id)
+
+  missingOvQuery = data.table(query.id = integer(0), subject.id = integer(0))
+  if (length(missingIds) > 0) {
+      gr_oncokb$oid_ = seq_len(NROW(gr_oncokb))
+      ovMissing <- gUtils::gr.findoverlaps(gr_oncokb[missingIds], gr_multiplicity, by = c("gene", "ALT"), type = "equal", qcol = "oid_")
+      ## ovQuery <- data.table(query.id = integer(0), subject.id = integer(0))
+      missingOvQuery <- data.table(query.id = integer(0), subject.id = integer(0))
+      if (NROW(ovMissing) > 0) {
+          missingOvQuery <- gUtils::gr2dt(ovMissing)[, .(query.id = oid_, subject.id)]
+      }
+  }
+  ovQuery = rbind(ovQuery, missingOvQuery)
+
+  ## ov <- gUtils::gr.findoverlaps(gr_oncokb, gr_multiplicity, by = c("gene", "ALT"), type = "equal")
+  ## ovQuery <- data.table(query.id = integer(0), subject.id = integer(0))
+  ## if (NROW(ov) > 0) {
+  ##   ovQuery <- gUtils::gr2dt(ov)[, .(query.id, subject.id)]
+  ## }
+  ## missingIds <- setdiff(1:NROW(gr_oncokb), ov$query.id)
+
+  missingIds = setdiff(seq_len(NROW(gr_oncokb)), ovQuery$query.id)
   missingOvQuery <- data.table(query.id = integer(0), subject.id = integer(0))
 
   if (length(missingIds) > 0) {

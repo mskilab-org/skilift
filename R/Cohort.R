@@ -986,7 +986,7 @@ default_col_mapping <- list(
   inferred_sex = c("inferred_sex", "sex"),
   tumor_bam = c("tumor_bam", "bam_tumor"),
   normal_bam = c("normal_bam", "bam_normal"),
-  structural_variants = c("structural_variants", "gridss_somatic", "gridss_sv", "svaba_sv", "sv", "svs", "vcf"),
+  structural_variants = c("structural_variants", "gridss_somatic", "gridss_sv", "svaba_sv", "sv", "svs"),
   structural_variants_retiered = c("structural_variants_retiered"),
   structural_variants_unfiltered = "structural_variants_unfiltered",
   structural_variants_raw = "structural_variants_raw",
@@ -1446,4 +1446,64 @@ pairify_cohort_inputs = function(cohort, tumor_status = 1L, normal_status = 0L, 
 		)
 	}
 	return(return_inputs)
+}
+
+
+#' Fill Out Normal
+#' 
+#' Create normal with basic information
+#' 
+#' Need for this arises from gosh output
+#' not always filling out normal paths
+#' if cohort reuses normals across
+#' tumor samples. 
+#' 
+fill_out_normal = {
+  function(
+  cohort,
+  normal_cols = c(
+    "normal_sample", 
+    "normal_bam", 
+    "fragcounter_normal", 
+    "estimate_library_complexity_normal", 
+    "alignment_summary_metrics_normal", 
+    "insert_size_metrics_normal", 
+    "normal_wgs_metrics"
+  )
+) {
+    ENV = environment()
+    is_r6 = inherits(x = cohort, what = c("R6"))
+    is_cohort = inherits(x = cohort, what = c("Cohort"))
+    is_tbl = inherits(x = cohort, what = c("data.frame"))
+    if (is_r6 && is_cohort) {
+      tbl = cohort$inputs
+    } else if (is_tbl) {
+      tbl = cohort
+    } else {
+      stop("wtf")
+    }
+    dtnorm = as.data.table(mget(normal_cols, envir = as.environment(as.list(tbl))))
+    dtnorm = Skilift:::nacharacter(dtnorm)
+    dtnorm_collapsed = dtnorm[, {
+      main = function() {
+        lst = lapply(
+          X = .SD,
+          FUN = function(x) {
+            out = unique(x)
+            return(out[!is.na(out)][1])
+          }
+        )
+        return(lst)
+      }
+      main()
+    }, by = {
+      bymain = function() {
+        list(
+          normal_sample = normal_sample
+          )
+      }
+      bymain()
+    }, .SDcols = normal_cols]
+    return(dtnorm_collapsed)
+  }
 }

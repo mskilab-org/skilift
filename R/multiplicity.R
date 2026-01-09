@@ -18,6 +18,16 @@ pick_first_snpeff = function(
 }
 
 annotate_multihit = function(oncokb_mult) { ## oncokb multiplicity merged output from Skilift::merge_oncokb_multiplicity(oncokb, multiplicity)
+  lst = mget(
+	c("segment_cn", "segment_cn_low", "segment_cn_high"), 
+	envir = as.environment(as.list(oncokb_mult)), 
+	ifnotfound = list(NULL, NULL, NULL)
+  )
+  skip = any(sapply(lst, is.null))
+  if (skip) {
+	oncokb_mult$is_multi_hit_per_gene = NA
+	return(oncokb_mult)
+  }
   oncokb_mult = Skilift:::pick_first_snpeff(oncokb_mult)
 	## Parse Multi-hit status
   is_protein_coding = (

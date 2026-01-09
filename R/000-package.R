@@ -67,3 +67,91 @@ echtvar_vcf_fields = c("dbNSFP_gene", "dbNSFP_transcript_id", "dbNSFP_VEP_canoni
 "clinvar_ONCDN", "clinvar_ONCCONF", "clinvar_ONCREVSTAT", "clinvar_SCI", 
 "clinvar_SCIDN", "clinvar_SCIREVSTAT", "civic_GN", "civic_VT", 
 "civic_CSQ")
+
+template_filtered_events_class_icon = list(
+    "id" = "alphamissense",
+    "title" = "AlphaMissense",
+    "dataIndex" = "AlphaMissense",
+    "viewType" = "class-icon"
+)
+
+template_filtered_events_formatted_number = list(
+    "id" =  "altCounts",
+    "title" = "components.filtered-events-panel.altCounts",
+    "dataIndex" = "altCounts",
+    "type" = "numeric",
+    "viewType" = "formatted-number",
+    "width" = 100L,
+    "sortable" = TRUE,
+    "rendererProps" = list(
+        "format" = ","
+    )
+)
+
+
+default_echtvar_json_fields = list(
+    list(
+        "id" = "alphamissense",
+        "title" = "AlphaMissense",
+        "dataIndex" = "AlphaMissense",
+        "viewType" = "class-icon"
+    )
+    ,
+    list(
+        "id" = "sift",
+        "title" = "SIFT",
+        "dataIndex" = "SIFT",
+        "viewType" = "class-icon"
+    )
+    ,
+    list(
+        "id" = "polyphen2",
+        "title" = "Polyphen2",
+        "dataIndex" = "Polyphen2_HVAR",
+        "viewType" = "class-icon"
+    )
+    ,
+    list(
+        "id" = "clinvar",
+        "title" = "Clinvar",
+        "dataIndex" = "Clinvar",
+        "viewType" = "class-icon"
+    )
+)
+
+# {
+#     "id": "altCounts",
+#     "title": "components.filtered-events-panel.altCounts",
+#     "dataIndex": "altCounts",
+#     "type": "numeric",
+#     "viewType": "formatted-number",
+#     "width": 100,
+#     "sortable": true,
+#     "rendererProps": {
+#     "format": ","
+#     }
+# },
+
+# {
+#     "id": "complex_events.rDelDup",
+#     "title": "rDelDup Events Count",
+#     "type": "numeric",
+#     "group": "complex-events",
+#     "groupTitle": "Complex Events",
+#     "groupOrder": 6,
+#     "kpiPlot": true,
+#     "format": ",",
+#     "scale": "linear"
+# }
+
+template_metadata = list(
+    "id" = "complex_events.rDelDup",
+    "title" = "rDelDup Events Count",
+    "type" = "numeric",
+    "group" = "complex-events",
+    "groupTitle" = "Complex Events",
+    "groupOrder" = 6,
+    "kpiPlot" = TRUE,
+    "format" = ",",
+    "scale" = "linear"
+)
