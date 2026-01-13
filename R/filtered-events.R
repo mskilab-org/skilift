@@ -747,7 +747,7 @@ get_gene_ampdels_from_jabba <- function(jab, pge, amp.thresh = 4, del.thresh = 0
     max_cn_quantile_threshold = max_cn_quantile_threshold
   )
   gene_CN[, `:=`(type, NA_character_)]
-  gencode = dynGet("gencode") ## FIXME: kind of dangerous to get the variable from a parent environment.
+  gencode = dynGet("gencode", inherits = TRUE, minframe = 0L) ## FIXME: kind of dangerous to get the variable from a parent environment.
   exons_merged = GenomicRanges::reduce(gUtils::gr_construct_by(gencode[gencode$type == "exon"], by = "gene_name"))
   ## exons_merged = gUtils::gr_deconstruct_by(exons_merged, meta = TRUE, "gene_name")
   exons_merged$exon_width = width(exons_merged)
