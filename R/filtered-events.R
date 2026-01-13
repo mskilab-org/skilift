@@ -1398,7 +1398,10 @@ collect_oncokb <- function(oncokb_maf, multiplicity = NA_character_, verbose = T
     # vcf_alt = mat_vcf_id[,3]
     oncokb$vcf_ref = vcf_ref
     oncokb$vcf_alt = vcf_alt
-    rm(mat_vcf_id)
+    # rm(mat_vcf_id)
+    oncokb[["variant.g"]] = paste0(
+      oncokb$vcf_ref, ">", oncokb$vcf_alt
+    )
 
       ## oncokb$snpeff_ontology <- snpeff_ontology$short[match(oncokb$Consequence, snpeff_ontology$eff)]
 	
@@ -1432,45 +1435,60 @@ collect_oncokb <- function(oncokb_maf, multiplicity = NA_character_, verbose = T
     #   # }
     # }
     # names(oncokb) <- current_nms
-    return(oncokb[, .(
-      gene = Hugo_Symbol,
-      gene_summary = GENE_SUMMARY,
-      role = Role,
-      variant.g = paste(Chromosome, ":", Start_Position, "-", End_Position, " ", variant.g, sep = ""),
-      variant.c = HGVSc,
-      variant.p = HGVSp,
-      annotation = Consequence,
-      type = short,
-      tier = tier,
-      tier_description = tier_factor,
-      variant_summary = VARIANT_SUMMARY,
-      therapeutics = tx_string,
-      resistances = rx_string,
-      diagnoses = dx_string,
-      prognoses = px_string,
-      distance = NA_integer_,
-      effect = MUTATION_EFFECT,
-      effect_description = MUTATION_EFFECT_DESCRIPTION,
-      major_count = major.count,
-      minor_count = minor.count,
-      major_snv_copies,
-      minor_snv_copies,
-      # total_copies, ## total_copies gets converted to estimated_altered_copies downstream
-      altered_copies,
-      segment_cn,
-      ref,
-      alt,
-      VAF,
-      vartype = "SNV",
-      track = "variants",
-      source = "oncokb_maf",
-      is_multi_hit_per_gene,
-      Chromosome,
-      vcf_pos,
-      Tumor_Seq_Allele2,
-      vcf_ref,
-      vcf_alt
-    )])
+    return(
+      oncokb[, {
+        ENV = environment()
+        main = function() {
+          if (!exists("major.count", where = ENV)) {
+            major.count = NA_real_
+          }
+          if (!exists("minor.count", where = ENV)) {
+            minor.count = NA_real_
+          }
+          out = list(
+            gene = Hugo_Symbol,
+            gene_summary = GENE_SUMMARY,
+            role = Role,
+            variant.g = paste(Chromosome, ":", Start_Position, "-", End_Position, " ", variant.g, sep = ""),
+            variant.c = HGVSc,
+            variant.p = HGVSp,
+            annotation = Consequence,
+            type = short,
+            tier = tier,
+            tier_description = tier_factor,
+            variant_summary = VARIANT_SUMMARY,
+            therapeutics = tx_string,
+            resistances = rx_string,
+            diagnoses = dx_string,
+            prognoses = px_string,
+            distance = NA_integer_,
+            effect = MUTATION_EFFECT,
+            effect_description = MUTATION_EFFECT_DESCRIPTION,
+            major_count = major.count,
+            minor_count = minor.count,
+            major_snv_copies = major_snv_copies,
+            minor_snv_copies = minor_snv_copies,
+            # total_copies, ## total_copies gets converted to estimated_altered_copies downstream
+            altered_copies = altered_copies,
+            segment_cn = segment_cn,
+            ref = ref,
+            alt = alt,
+            VAF = VAF,
+            vartype = "SNV",
+            track = "variants",
+            source = "oncokb_maf",
+            is_multi_hit_per_gene = is_multi_hit_per_gene,
+            Chromosome = Chromosome,
+            vcf_pos = vcf_pos,
+            Tumor_Seq_Allele2 = Tumor_Seq_Allele2,
+            vcf_ref = vcf_ref,
+            vcf_alt = vcf_alt
+          )
+          return(out)
+        }
+        main()
+      }]
+    )
   }
   return(empty_output_oncokb)
 }
