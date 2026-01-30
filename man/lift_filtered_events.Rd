@@ -9,7 +9,11 @@ lift_filtered_events(
   output_data_dir,
   cores = 1,
   return_table = TRUE,
-  additional_columns = Skilift:::default_echtvar_json_fields
+  additional_columns = Skilift:::default_echtvar_json_fields,
+  show_all_tags = FALSE,
+  show_all_small_muts_tags = FALSE,
+  show_all_cna_tags = FALSE,
+  show_all_svs_tags = FALSE
 )
 }
 \arguments{

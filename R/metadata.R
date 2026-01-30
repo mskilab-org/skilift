@@ -2036,7 +2036,9 @@ test_list_attributes = function(x) {
       is_simple_list = FALSE,
       is_ragged_list_depth1 = FALSE,
       is_deeply_nested = FALSE,
-      is_list_of_dataframes = FALSE
+      is_list_of_dataframes = FALSE,
+      is_empty = FALSE,
+      is_list_of_df_any_len0 = FALSE
     ))
   }
   test_element_data_frame = function(listObj) {
@@ -2057,7 +2059,11 @@ test_list_attributes = function(x) {
   if (is_list) {
     is_list_of_dataframes = test_element_data_frame(x)
   }
-  if (is_list_of_dataframes) is_deeply_nested = FALSE
+  is_list_of_df_any_len0 = FALSE
+  if (is_list_of_dataframes) {
+    is_deeply_nested = FALSE
+    is_list_of_df_any_len0 = any(lens == 0)
+  }
   is_simple_list = is_list && !is_list_of_dataframes
   is_empty = is_list && (nr == 0 || nr_lens == 0)
   is_ragged_list_depth1 = is_simple_list && !is_all_same_len ## doesn't guarantee that nested list is ragged, but whatever.. deal with if nested list is ragged case if it arises later
@@ -2067,7 +2073,8 @@ test_list_attributes = function(x) {
       is_ragged_list_depth1 = is_ragged_list_depth1,
       is_deeply_nested = is_deeply_nested,
       is_list_of_dataframes = is_list_of_dataframes,
-      is_empty = is_empty
+      is_empty = is_empty,
+      is_list_of_df_any_len0 =  is_list_of_df_any_len0
     )
   )
 }
@@ -2150,6 +2157,7 @@ convert_json_to_arrow <- function(json_file_path, arrow_file_path = NULL) {
     is_ragged_list_depth1 = lst_attributes$is_ragged_list_depth1
     is_list_of_dataframes = lst_attributes$is_list_of_dataframes
     is_list = is_simple_list || is_list_of_dataframes
+    is_list_of_df_any_len0 = lst_attributes$is_list_of_df_any_len0
 
     if (is_list) {
 
@@ -2158,7 +2166,7 @@ convert_json_to_arrow <- function(json_file_path, arrow_file_path = NULL) {
       
       all_elements_empty <- all(sapply(data[[col_name]], is_simple_empty))
 
-      do_revise_values = all_elements_empty || is_ragged_list_depth1
+      do_revise_values = all_elements_empty || is_ragged_list_depth1 || is_list_of_df_any_len0
       
       if (! do_revise_values) {
         next
@@ -2186,9 +2194,17 @@ convert_json_to_arrow <- function(json_file_path, arrow_file_path = NULL) {
         )[as.character(seq_len(NROW(val)))]
         names(val_revise) = rep_len(col_name, NROW(val_revise))
       }
+      
+      if (is_list_of_df_any_len0) {
+        lens = S4Vectors::elementNROWS(val)
+        val_revise = val
+        val_revise[lens == 0] = list(NULL)
+      }
 
       data[[col_name]] <- val_revise
     }
+
+
   }
 
   # Write Arrow file

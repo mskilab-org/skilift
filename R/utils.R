@@ -958,7 +958,14 @@ copy_internal = function (x, recurse_list = TRUE, verbose = FALSE, depth = 0L) {
             if (is_fun) next
             objname = paste(name, nname)
             is_nested_r6 = inherits(obj, "R6")
-            if (is_nested_r6 && all(dynGet("top_env")$x2 == obj)) {
+            topenv_obj = dynGet("top_env")$x2
+            are_objects_equivalent = suppressWarnings(tryCatch(
+                topenv_obj == obj,
+                error = function(e) {
+                    identical(topenv_obj, obj)
+                }
+            ))
+            if (is_nested_r6 && all(are_objects_equivalent)) {
               cond = structure(
                 list(
                   message = "Self-referential field detected",
