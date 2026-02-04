@@ -1502,6 +1502,7 @@ merge_annotations = function(onco, annotated_vcf, fields = Skilift:::echtvar_vcf
   is_vcf_path = is.character(annotated_vcf) && length(annotated_vcf) == 1
   if (is_vcf_path && !all(file.exists(annotated_vcf))) stop("annotated_vcf path does not exist to merge with oncotable")
   if (is_vcf_path) {
+   
     annotated_vcf = gGnome:::read_vcf(annotated_vcf)
   }
 
@@ -2006,7 +2007,8 @@ oncotable <- function(
     fields_geno = rownames(VariantAnnotation::geno(vcfheader))
     fields_to_pass = unique(
       c(
-        Skilift:::echtvar_vcf_fields, ## redundancy to ensure these are added by default
+        intersect(fields_info, Skilift:::echtvar_vcf_fields), ## redundancy to ensure these are added by default
+        intersect(fields_geno, Skilift:::echtvar_vcf_fields), ## redundancy to ensure these are added by default
         intersect(fields_info, somatic_variant_annotations_fields),
         intersect(fields_geno, somatic_variant_annotations_fields)
       )
