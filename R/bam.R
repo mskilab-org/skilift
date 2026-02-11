@@ -9,10 +9,22 @@
 #' @param cores Number of cores for parallel processing (default: 1)
 #' @return None
 #' @export
-lift_bam <- function(cohort, output_data_dir, cores = 1, overwrite = FALSE) {
+lift_bam <- function(cohort, output_data_dir, cores = 1, overwrite = FALSE, copy = FALSE) {
     if (!inherits(cohort, "Cohort")) {
         stop("Input must be a Cohort object")
     }
+
+    transfer_method = "ln -n"
+    # force_flag = if (overwrite) "f" else ""
+    do_ln_and_add_f_flag = !all(copy) && all(overwrite)
+    do_copy = all(copy)
+    if (do_ln_and_add_f_flag) {
+        transfer_method = paste(transfer_method, "-f")
+    }
+    if (all(copy)) {
+        transfer_method = "cp"
+    }
+
     
     if (!dir.exists(output_data_dir)) {
         dir.create(output_data_dir, recursive = TRUE)
@@ -51,7 +63,7 @@ lift_bam <- function(cohort, output_data_dir, cores = 1, overwrite = FALSE) {
     }
 
     # Process each sample in parallel
-    force_flag = if (overwrite) "f" else ""
+    
     upload_bam = function(i) {
         row <- lift_inputs[i,]
         pair_dir <- file.path(output_data_dir, row$pair)
@@ -83,15 +95,15 @@ lift_bam <- function(cohort, output_data_dir, cores = 1, overwrite = FALSE) {
 		  is_input_normal_bam_present = !is.null(row$normal_bam) && ! any(is.na(row$normal_bam))
 
           if (is_input_tumor_bam_present) {
-            cmd_bam = glue::glue('ln -n{force_flag} {row$tumor_bam} {tumor_bam_file}')
-            cmd_bai = glue::glue('ln -n{force_flag} {row$tumor_bam_bai} {tumor_bai_file}')
+            cmd_bam = glue::glue('{transfer_method} {row$tumor_bam} {tumor_bam_file}')
+            cmd_bai = glue::glue('{transfer_method} {row$tumor_bam_bai} {tumor_bai_file}')
             exit_tbam = system(cmd_bam)
             exit_tbai = system(cmd_bai)
           }
         
           if (is_input_normal_bam_present) {
-            cmd_bam = glue::glue('ln -n{force_flag} {row$normal_bam} {normal_bam_file}')
-            cmd_bai = glue::glue('ln -n{force_flag} {row$normal_bam_bai} {normal_bai_file}')
+            cmd_bam = glue::glue('{transfer_method} {row$normal_bam} {normal_bam_file}')
+            cmd_bai = glue::glue('{transfer_method} {row$normal_bam_bai} {normal_bai_file}')
             exit_nbam = system(cmd_bam)
             exit_nbai = system(cmd_bai)
           }
