@@ -434,7 +434,7 @@ multiplicity_to_intervals <- function(
     node_metadata = NULL,
     reference_name = "hg19",
     cohort_type,
-	subsample_size = 1e3
+	subsample_size = NULL ## Was 1000 previously, frontend now can handle more.. 
 ) {
     # Load chromosome lengths from settings
     settings_data <- jsonlite::fromJSON(settings)
@@ -556,6 +556,9 @@ multiplicity_to_intervals <- function(
         } else {
 			gr = gr_in_query
 		}  
+	} else {
+		message("No subsampling applied to multiplicity data")
+		message("Multiplicity track will contain ", NROW(gr), " variants")
 	}
 
   # Validate ranges

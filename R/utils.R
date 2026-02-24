@@ -1,3 +1,32 @@
+timestamp = function() {
+    return(gsub("[\\:\\-]", "", gsub("\\s", "_", Sys.time())))
+}
+
+staveRDS = function (object, file, note = NULL, ..., verbose = FALSE) {
+    stamped.file = gsub(".rds$", paste(".", timestamp(), ".rds", 
+        sep = ""), file, ignore.case = TRUE)
+    saveRDS(object, stamped.file, ...)
+    if (file.exists(file)) {
+        if (verbose) 
+            message("Removing existing ", file)
+        system(paste("rm", file))
+    }
+    if (verbose) 
+        message("Symlinking ", file, " to ", stamped.file)
+    system(paste("ln -sfnr", normalizePath(stamped.file), file))
+    if (!is.null(note)) {
+        writeLines(note, paste0(stamped.file, ".readme"))
+    }
+    return(
+      base::dput(
+        list(
+          stamped_file = normalizePath(stamped.file),
+          symlink_file = file
+        )
+      )
+    )
+}
+
 
 #' Print useful messages to console
 #' 

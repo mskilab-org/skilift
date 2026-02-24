@@ -203,6 +203,12 @@ lift_all <- function(
     warning("Creating datafiles.json directory")
   }
 
+
+  Skilift:::staveRDS(
+    cohort_mod,
+    file.path(output_data_dir, "cohort.rds"),
+  )
+
   return(cohort_mod)
 }
 

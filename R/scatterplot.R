@@ -111,6 +111,7 @@ granges_to_arrow_scatterplot <- function(
         ref = ref,
         cov.color.field = cov.color.field,
         bin.width = bin.width,
+        rebin_fun = sum,
         ...
     )
 
