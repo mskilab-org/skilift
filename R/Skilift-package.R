@@ -14,7 +14,7 @@
 #' @importFrom VariantAnnotation readVcf geno ref alt scanVcfHeader
 #' @importFrom arrow Table write_feather schema float32
 #' @importFrom gGnome cov2cov.js
-#' @importFrom gUtils gr2dt dt2gr %Q% gr.val %$% %*% gr.chr gr.nochr gr.findoverlaps gr.stripstrand gr.tile
+#' @importFrom gUtils gr2dt dt2gr %Q% gr.val %$% %*% gr.chr gr.nochr gr.findoverlaps gr.stripstrand gr.tile si2gr
 #' @importFrom skitools rel2abs
 #' @importFrom magrittr %>%
 #' @importFrom parallel mclapply
@@ -23,6 +23,11 @@
 #' @importFrom GenomeInfoDb Seqinfo seqnames seqnames<- seqinfo seqinfo<- seqlengths seqlengths<- seqlevels seqlevels<- seqlevelsStyle seqlevelsStyle<-
 #' @importFrom BiocGenerics width
 #' @importFrom glue glue
+#' @importFrom plotly ggplotly subplot
+#' @importFrom htmlwidgets saveWidget
+#' @importFrom grDevices png dev.off
+#' @importFrom ggpubr stat_cor
+#' @importFrom scico scale_fill_scico scale_color_scico
 #' @importMethodsFrom BiocGenerics width sort
 #' @importMethodsFrom IRanges trim start end
 #' @importMethodsFrom GenomeInfoDb seqnames seqnames<- seqinfo seqinfo<- seqlengths seqlengths<- seqlevels seqlevels<- seqlevelsStyle seqlevelsStyle<- sortSeqlevels
@@ -48,3 +53,4 @@ registerS3method(genname = "merge", class = "data.table", method = data.table::m
 	}
 	
 }
+

@@ -1215,13 +1215,7 @@ parse_pipeline_paths <- function(
 }
 
 
-#' deparse1 copy
-#'
-#' Robustly deparse object
-#'
-deparse1 <- function(expr, collapse = " ", width.cutoff = 500L, ...) {
-  paste(deparse(expr, width.cutoff, ...), collapse = collapse)
-}
+
 
 cohort_attributes <- c(
   "inputs",

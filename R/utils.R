@@ -1227,3 +1227,155 @@ order_to_rank <- function(x, ties.method = "average", order_fun = base::order) {
   r[o] <- group_rank
   r
 }
+
+
+
+#' deparse1 copy
+#'
+#' Robustly deparse object
+#'
+deparse1 <- function(expr, collapse = " ", width.cutoff = 500L, ...) {
+  paste(deparse(expr, width.cutoff, ...), collapse = collapse)
+}
+
+
+#' get S4 Slot
+#' 
+#' Simple function that returns NULL if slot not present
+#' instead of erroring out
+#' 
+#' @export
+getslot = function(object, name, default = NULL) {
+    suppressWarnings({
+        is_character = tryCatch(is.character(name), error = function(e) FALSE)
+        is_symbol_name = tryCatch(is.symbol(name), error = function(e) FALSE)
+        is_symbol_substitute_name = tryCatch(is.symbol(substitute(name)), error = function(e) FALSE)
+        is_to_be_deparsed = is_symbol_name || is_symbol_substitute_name
+    })
+    if (is_character) {
+        nm = name
+    }
+    if (is_to_be_deparsed) {
+        if (is_symbol_substitute_name) nm = substitute(name)
+        nm = deparse1(nm)
+    }
+    ## Note object can be NULL
+    if (!methods::.hasSlot(object, nm)) return(default)
+    return(methods::slot(object, nm))
+}
+
+#' Get chain of S4 methods
+#' 
+#' Function that goes through the chain of arguments and returns a default
+#' instead of erroring out
+#' 
+#' @export
+getslotchain = function(object, ..., default = NULL) {
+    args = match.call(expand.dots = FALSE)$...
+    out_object = object
+    for (arg in args) {
+        out_object = getslot(out_object, as.character(arg), default = default)
+    }
+    return(out_object)
+}
+
+`%@%` = getslot
+
+
+correct_ggplot_theme = function(ggplot_obj) {
+  # The unexported function Skilift:::`%@%` is defined in utils.R
+  ggplot_theme = ggplot_obj %@% theme
+  do_populate_plot_margin = (
+    ! is.null(ggplot_theme)
+    && (
+      (
+        ! exists("plot.margin", ggplot_theme)
+        && exists("margins", ggplot_theme)
+      ) || (
+        is.null(ggplot_theme[["plot.margin"]])
+        && !is.null(ggplot_theme[["margins"]])
+      )
+    )
+  )
+    do_populate_plot_default_margin = (
+    ! is.null(ggplot_theme)
+    && (
+      (
+        ! exists("plot.margin", ggplot_theme)
+        && ! exists("margins", ggplot_theme)
+      ) || (
+        is.null(ggplot_theme[["plot.margin"]])
+        && is.null(ggplot_theme[["margins"]])
+      )
+    )
+  )
+  if (do_populate_plot_margin) {
+    ggplot_theme[["plot.margin"]] = ggplot_theme[["margins"]]
+    ggplot_obj@theme = ggplot_theme
+  }
+  if (do_populate_plot_default_margin) {
+    ggplot_theme[["margins"]] = Skilift:::default_s7_ggplot2_margin()
+    ggplot_theme[["plot.margin"]] = ggplot_theme[["margins"]]
+    ggplot_obj@theme = ggplot_theme
+  }
+  return(ggplot_obj)
+}
+
+
+default_s7_ggplot2_margin = function() {
+    main = function() {
+      out = structure(c(5.5, 5.5, 5.5, 5.5), class = c("ggplot2::margin", 
+      "simpleUnit", "unit", "unit_v2", "S7_object"), S7_class = structure(function (t = 0, 
+          r = 0, b = 0, l = 0, unit = "pt", ...) 
+      {
+          warn_dots_empty()
+          lens <- c(length(t), length(r), length(b), length(l))
+          if (any(lens != 1)) {
+              incorrect <- c("t", "r", "b", "l")[lens != 1]
+              s <- if (length(incorrect) > 1) 
+                  "s"
+              else ""
+              cli::cli_warn(c("In {.fn margin}, the argument{s} {.and {.arg {incorrect}}} should \\\n        have length 1, not length {.and {lens[lens != 1]}}.", 
+                  i = "Argument{s} get(s) truncated to length 1."))
+              t <- t[1]
+              r <- r[1]
+              b <- b[1]
+              l <- l[1]
+          }
+          u <- unit(c(t, r, b, l), unit)
+          S7::new_object(u)
+      }, name = "margin", parent = structure(list(class = c("simpleUnit", 
+      "unit", "unit_v2"), constructor = function (.data) 
+      {
+          stop(sprintf("S3 class <%s> doesn't have a constructor", 
+              class[[1]]), call. = FALSE)
+      }, validator = NULL), class = "S7_S3_class"), package = "ggplot2", properties = list(), abstract = FALSE, constructor = function (t = 0, 
+          r = 0, b = 0, l = 0, unit = "pt", ...) 
+      {
+          warn_dots_empty()
+          lens <- c(length(t), length(r), length(b), length(l))
+          if (any(lens != 1)) {
+              incorrect <- c("t", "r", "b", "l")[lens != 1]
+              s <- if (length(incorrect) > 1) 
+                  "s"
+              else ""
+              cli::cli_warn(c("In {.fn margin}, the argument{s} {.and {.arg {incorrect}}} should \\\n        have length 1, not length {.and {lens[lens != 1]}}.", 
+                  i = "Argument{s} get(s) truncated to length 1."))
+              t <- t[1]
+              r <- r[1]
+              b <- b[1]
+              l <- l[1]
+          }
+          u <- unit(c(t, r, b, l), unit)
+          S7::new_object(u)
+      }, class = c("S7_class", "S7_object")), unit = 8L)
+      return(out)
+    }
+    tryCatch(
+      main(), 
+      error = function(e) {
+        c(5.5, 5.5, 5.5, 5.5)
+      }
+    )
+}
+

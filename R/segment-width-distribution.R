@@ -460,15 +460,6 @@ process_multiplicity_fit <- function(
 #' @param save_data Logical value to save data files (default: TRUE)
 #' @return None
 #' @author Johnathan Rafailov
-#' @importFrom data.table fread setDT
-#' @importFrom ggplot2 ggplot geom_boxplot geom_point aes theme_bw xlab ylab ggtitle ggsave
-#' @importFrom plotly ggplotly subplot
-#' @importFrom htmlwidgets saveWidget
-#' @importFrom jsonlite write_json
-#' @importFrom gUtils gr.tile si2gr
-#' @importFrom GenomicRanges GRanges seqlengths
-#' @importFrom grDevices png dev.off
-#' @importFrom ggpubr stat_cor theme_bw
 #' @export
 lift_coverage_jabba_cn <- function(
     cohort,
@@ -608,10 +599,10 @@ save_coverage_jabba_cn_html <- function(tiles.dt, out_file_html) {
         xlab("JaBbA CN") +
         ylab("Original Coverage") +
         ggtitle("Original Coverage vs JaBbA CN")
-    
+     
     # Save as HTML
-    p_plotly <- ggplotly(p, width = 800, height = 800)
-    q_plotly <- ggplotly(q, width = 800, height = 800)
+    p_plotly <- ggplotly(Skilift:::correct_ggplot_theme(p), width = 800, height = 800)
+    q_plotly <- ggplotly(Skilift:::correct_ggplot_theme(q), width = 800, height = 800)
     subplot(p_plotly, q_plotly, nrows = 1, shareX = FALSE, shareY = FALSE) %>%
     plotly::layout(
         xaxis = list(title = "CN"),
@@ -630,6 +621,7 @@ save_coverage_jabba_cn_html <- function(tiles.dt, out_file_html) {
         selfcontained = FALSE
     )
 }
+
 save_coverage_jabba_cn_png <- function(tiles.dt, out_file_denoised_png, out_file_original_png) {
     # Create ggplot
     p <- ggplot(tiles.dt[masked == F], aes(x = cn, y = cov)) +
@@ -674,12 +666,6 @@ save_coverage_jabba_cn_png <- function(tiles.dt, out_file_denoised_png, out_file
 #' @param save_pngs Logical value to save PNG files (default: TRUE)
 #' @param save_html Logical value to save HTML files (default: TRUE)
 #' @param save_data Logical value to save data files (default: TRUE)
-#' @importFrom data.table fread setDT
-#' @importFrom ggplot2 ggplot geom_raster aes scale_fill_scico geom_point geom_segment theme_bw scale_y_continuous scale_x_continuous xlab ylab ggsave
-#' @importFrom plotly ggplotly subplot
-#' @importFrom htmlwidgets saveWidget
-#' @importFrom jsonlite write_json
-#' @importFrom scico scale_fill_scico scale_color_scico
 #' @export
 #' 
 #' @references Code adapted from:
@@ -704,85 +690,80 @@ lift_purple_sunrise_plot <- function(
     }
 
     # Process each sample in parallel
+    futile.logger::flog.threshold("ERROR")
     mclapply(seq_len(nrow(cohort$inputs)), function(i) {
-        row <- cohort$inputs[i, ]
-        pair_dir <- file.path(output_data_dir, row$pair)
+        main = function() {
+            row <- cohort$inputs[i, ]
+            pair_dir <- file.path(output_data_dir, row$pair)
 
-        if (!dir.exists(pair_dir)) {
-            dir.create(pair_dir, recursive = TRUE)
-        }
-
-        out_file <- file.path(pair_dir, "purple_sunrise.json")
-        out_file_png <- file.path(pair_dir, "purple_sunrise_pp.png")
-        out_file_beta_gamma_png <- file.path(pair_dir, "purple_sunrise_beta_gamma.png")
-        out_file_html <- file.path(pair_dir, "combined_plot.html")
-
-        futile.logger::flog.threshold("ERROR")
-        tryCatchLog(
-            {
-                if (!file.exists(row$purple_pp_range)) {
-                    print(sprintf("Purple purity range file not found for %s: %s", row$pair, row$purple_pp_range))
-                    return(NULL)
-                }
-
-                if (!file.exists(row$purple_pp_bestFit)) {
-                    print(sprintf("Purple best fit file not found for %s: %s", row$pair, row$purple_pp_bestFit))
-                    return(NULL)
-                }
-                range <- fread(row$purple_pp_range)
-                fit <- fread(row$purple_pp_bestFit)
-
-                bestPurity <- fit[, purity]
-                bestPloidy <- fit[, ploidy]
-                bestScore <- fit[, score]
-
-                setorder(range, purity, ploidy)
-                range[, absScore := pmin(4, score)]
-                range[, score := pmin(1, abs(score - bestScore) / score)]
-                range[, leftPloidy := shift(ploidy, type = "lag"), by = purity]
-                range[, rightPloidy := shift(ploidy, type = "lead"), by = purity]
-                range[, xmin := ploidy - (ploidy - leftPloidy) / 2]
-                range[, xmax := ploidy + (rightPloidy - ploidy) / 2]
-                range[, ymin := purity - 0.005]
-                range[, ymax := purity + 0.005]
-                range[, xmin := ifelse(is.na(xmin), ploidy, xmin)]
-                range[, xmax := ifelse(is.na(xmax), ploidy, xmax)]
-                maxPloidy <- range[, .SD[.N], by = purity][, max(xmax)]
-                minPloidy <- range[, .SD[1], by = purity][, min(xmin)]
-                minPurity <- min(range$purity)
-                maxPurity <- max(range$purity)
-                range <- range[xmin <= maxPloidy & xmax >= minPloidy]
-                range[, xmax := pmin(xmax, maxPloidy)]
-                range[, xmin := pmax(xmin, minPloidy)]
-
-                range[, beta := ploidy / (purity * ploidy + 2 * (1 - purity))]
-                range[, gamma := 2 * (1 - purity) / (purity * ploidy + 2 * (1 - purity))]
-                bestGamma <- 2 * (1 - bestPurity) / (bestPurity * bestPloidy + 2 * (1 - bestPurity))
-                bestBeta <- bestPloidy / (bestPurity * bestPloidy + 2 * (1 - bestPurity))
-
-                # Write the processed data to JSON if save_data is TRUE
-                if (save_data) {
-                    write_json(range[, .(purity, ploidy, score, xmin, xmax, ymin, ymax)], out_file, pretty = TRUE)
-                }
-
-                p <- create_purity_ploidy_plot(range, bestPloidy, bestPurity, minPurity, maxPurity, minPloidy, maxPloidy, use_geom_rect = TRUE)
-                q <- create_beta_gamma_plot(range, bestBeta, bestGamma)
-
-                if (save_html) {
-                    p_html <- create_purity_ploidy_plot(range, bestPloidy, bestPurity, minPurity, maxPurity, minPloidy, maxPloidy, use_geom_rect = FALSE)
-                    save_purple_sunrise_html(p_html, q, out_file_html)
-                }
-
-                if (save_pngs) {
-                    save_purple_sunrise_pngs(p, q, out_file_png, out_file_beta_gamma_png)
-                }
-
-            },
-            error = function(e) {
-                print(sprintf("Error processing %s: %s", row$pair, e$message))
+            if (!dir.exists(pair_dir)) {
+                dir.create(pair_dir, recursive = TRUE)
             }
-        )
-    }, mc.cores = cores, mc.preschedule = TRUE)
+
+            out_file <- file.path(pair_dir, "purple_sunrise.json")
+            out_file_png <- file.path(pair_dir, "purple_sunrise_pp.png")
+            out_file_beta_gamma_png <- file.path(pair_dir, "purple_sunrise_beta_gamma.png")
+            out_file_html <- file.path(pair_dir, "combined_plot.html")
+            if (!file.exists(row$purple_pp_range)) {
+                print(sprintf("Purple purity range file not found for %s: %s", row$pair, row$purple_pp_range))
+                return(NULL)
+            }
+
+            if (!file.exists(row$purple_pp_bestFit)) {
+                print(sprintf("Purple best fit file not found for %s: %s", row$pair, row$purple_pp_bestFit))
+                return(NULL)
+            }
+            range <- fread(row$purple_pp_range)
+            fit <- fread(row$purple_pp_bestFit)
+
+            bestPurity <- fit[, purity]
+            bestPloidy <- fit[, ploidy]
+            bestScore <- fit[, score]
+
+            setorder(range, purity, ploidy)
+            range[, absScore := pmin(4, score)]
+            range[, score := pmin(1, abs(score - bestScore) / score)]
+            range[, leftPloidy := shift(ploidy, type = "lag"), by = purity]
+            range[, rightPloidy := shift(ploidy, type = "lead"), by = purity]
+            range[, xmin := ploidy - (ploidy - leftPloidy) / 2]
+            range[, xmax := ploidy + (rightPloidy - ploidy) / 2]
+            range[, ymin := purity - 0.005]
+            range[, ymax := purity + 0.005]
+            range[, xmin := ifelse(is.na(xmin), ploidy, xmin)]
+            range[, xmax := ifelse(is.na(xmax), ploidy, xmax)]
+            maxPloidy <- range[, .SD[.N], by = purity][, max(xmax)]
+            minPloidy <- range[, .SD[1], by = purity][, min(xmin)]
+            minPurity <- min(range$purity)
+            maxPurity <- max(range$purity)
+            range <- range[xmin <= maxPloidy & xmax >= minPloidy]
+            range[, xmax := pmin(xmax, maxPloidy)]
+            range[, xmin := pmax(xmin, minPloidy)]
+
+            range[, beta := ploidy / (purity * ploidy + 2 * (1 - purity))]
+            range[, gamma := 2 * (1 - purity) / (purity * ploidy + 2 * (1 - purity))]
+            bestGamma <- 2 * (1 - bestPurity) / (bestPurity * bestPloidy + 2 * (1 - bestPurity))
+            bestBeta <- bestPloidy / (bestPurity * bestPloidy + 2 * (1 - bestPurity))
+
+            # Write the processed data to JSON if save_data is TRUE
+            if (save_data) {
+                write_json(range[, .(purity, ploidy, score, xmin, xmax, ymin, ymax)], out_file, pretty = TRUE)
+            }
+
+            p <- create_purity_ploidy_plot(range, bestPloidy, bestPurity, minPurity, maxPurity, minPloidy, maxPloidy, use_geom_rect = TRUE)
+            q <- create_beta_gamma_plot(range, bestBeta, bestGamma)
+
+            if (save_html) {
+                p_html <- create_purity_ploidy_plot(range, bestPloidy, bestPurity, minPurity, maxPurity, minPloidy, maxPloidy, use_geom_rect = FALSE)
+                save_purple_sunrise_html(p_html, q, out_file_html)
+            }
+
+            if (save_pngs) {
+                save_purple_sunrise_pngs(p, q, out_file_png, out_file_beta_gamma_png)
+            }
+        }
+        main()
+    },
+    mc.cores = cores, mc.preschedule = TRUE)
 }
 
 create_purity_ploidy_plot <- function(purple_purity_range, bestPloidy, bestPurity, minPurity, maxPurity, minPloidy, maxPloidy, use_geom_rect = TRUE) {
@@ -837,8 +818,8 @@ create_beta_gamma_plot <- function(purple_purity_range, bestBeta, bestGamma) {
 }
 
 save_purple_sunrise_html <- function(p, q, out_file_html) {
-    p_plotly <- ggplotly(p, width = 800, height = 800)
-    q_plotly <- ggplotly(q, width = 800, height = 800)
+    p_plotly <- ggplotly(Skilift:::correct_ggplot_theme(p), width = 800, height = 800)
+    q_plotly <- ggplotly(Skilift:::correct_ggplot_theme(q), width = 800, height = 800)
 
     subplot(p_plotly, q_plotly, nrows = 1, shareX = FALSE, shareY = FALSE) %>%
     plotly::layout(

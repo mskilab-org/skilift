@@ -4,7 +4,7 @@
 \alias{lift_bam}
 \title{lift_bam}
 \usage{
-lift_bam(cohort, output_data_dir, cores = 1, overwrite = FALSE)
+lift_bam(cohort, output_data_dir, cores = 1, overwrite = FALSE, copy = FALSE)
 }
 \arguments{
 \item{cohort}{Cohort object containing sample information}
