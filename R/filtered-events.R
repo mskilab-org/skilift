@@ -117,24 +117,24 @@ get_default_gencode = function(gencode_path_defaults = Skilift::GENCODE_DEFAULTS
     default_assembly[default_assembly == x[1]] = x[2]
   }
   
-	is_gencode_path_provided = nzchar(gencode_path_env)
-	is_gencode_path_existent = file.exists(gencode_path_env)
+  is_gencode_path_provided = nzchar(gencode_path_env)
+  is_gencode_path_existent = file.exists(gencode_path_env)
 
   is_gencode_dir_provided = nzchar(gencode_dir_env)
-	is_gencode_dir_existent = dir.exists(gencode_dir_env)
+  is_gencode_dir_existent = dir.exists(gencode_dir_env)
 
   gencode_paths_to_parse = gencode_path_defaults[[default_assembly]]
 
-	is_gencode_default_existent_locally = file.exists(gencode_paths_to_parse)
-	gencode_paths = gencode_paths_to_parse[is_gencode_default_existent_locally]
-	is_any_gencode_default_existent_locally = NROW(gencode_paths) > 0
+  is_gencode_default_existent_locally = file.exists(gencode_paths_to_parse)
+  gencode_paths = gencode_paths_to_parse[is_gencode_default_existent_locally]
+  is_any_gencode_default_existent_locally = NROW(gencode_paths) > 0
 
-	output_gencode_path = NULL
+  output_gencode_path = NULL
 
-	if (is_gencode_path_provided && is_gencode_path_existent) {
-		output_gencode_path = gencode_path_env
-		message("GENCODE_PATH environment variable found: ", output_gencode_path)
-	}
+  if (is_gencode_path_provided && is_gencode_path_existent) {
+    output_gencode_path = gencode_path_env
+    message("GENCODE_PATH environment variable found: ", output_gencode_path)
+  }
 
   is_output_null = is.null(output_gencode_path)
   
@@ -152,9 +152,9 @@ get_default_gencode = function(gencode_path_defaults = Skilift::GENCODE_DEFAULTS
   is_output_null = is.null(output_gencode_path)
 
   if (is_output_null && is_any_gencode_default_existent_locally) {
-		output_gencode_path = gencode_paths[1]
-		message("Using gencode path as default: ", output_gencode_path)
-	}
+    output_gencode_path = gencode_paths[1]
+    message("Using gencode path as default: ", output_gencode_path)
+  }
 
   return(output_gencode_path)
 }
@@ -665,53 +665,53 @@ get_gene_copy_numbers <- function(
 
     gene_cn_segments[, ix := seq_len(.N)]
 
-	# Order by copy number 
-	reord_gene_cn_segments = data.table::copy(gene_cn_segments[order(cn)])
-	reord_gene_cn_segments[
-		,
-		c("weight", "total_weight", "cweight", "from_cfrac", "to_cfrac", "is_at_min_quantile_threshold", "is_at_max_quantile_threshold") := {
-			weight = width # Should the weight just be width? This would make it a true quantile
-			# weight = width * (cn + 1e-9) # take care of 0's with a fudge factor
-			total_weight = sum(weight)
-			cweight = cumsum(weight)
-			to_cfrac = cweight / total_weight
+  # Order by copy number 
+  reord_gene_cn_segments = data.table::copy(gene_cn_segments[order(cn)])
+  reord_gene_cn_segments[
+    ,
+    c("weight", "total_weight", "cweight", "from_cfrac", "to_cfrac", "is_at_min_quantile_threshold", "is_at_max_quantile_threshold") := {
+      weight = width # Should the weight just be width? This would make it a true quantile
+      # weight = width * (cn + 1e-9) # take care of 0's with a fudge factor
+      total_weight = sum(weight)
+      cweight = cumsum(weight)
+      to_cfrac = cweight / total_weight
             ## setting lowest to something ridiculous to make sure argument of 0 works
-			from_cfrac = c(-1e9, to_cfrac[-.N])
+      from_cfrac = c(-1e9, to_cfrac[-.N])
             ## setting highest to something ridiculous to make sure argument of 1 works
             to_cfrac[.N] = 1e9
-			## interval is semi-closed - (from_cfrac, to_cfrac] (inclusive of to_cfrac, but not from_cfrac)
-			## so any interval included where from_cfrac is greater than or equal to threshold should be excluded
-			is_at_min_quantile_threshold = (
-				data.table::between(min_cn_quantile_threshold, from_cfrac, to_cfrac) 
-				& !from_cfrac >= min_cn_quantile_threshold
-			)
-			is_at_max_quantile_threshold = (
-				data.table::between(max_cn_quantile_threshold, from_cfrac, to_cfrac) 
-				& !from_cfrac >= max_cn_quantile_threshold
-			)
-			list(weight, total_weight, cweight, from_cfrac, to_cfrac, is_at_min_quantile_threshold, is_at_max_quantile_threshold)
-		}
-		,
-		by = gene_name
-	]
+      ## interval is semi-closed - (from_cfrac, to_cfrac] (inclusive of to_cfrac, but not from_cfrac)
+      ## so any interval included where from_cfrac is greater than or equal to threshold should be excluded
+      is_at_min_quantile_threshold = (
+        data.table::between(min_cn_quantile_threshold, from_cfrac, to_cfrac) 
+        & !from_cfrac >= min_cn_quantile_threshold
+      )
+      is_at_max_quantile_threshold = (
+        data.table::between(max_cn_quantile_threshold, from_cfrac, to_cfrac) 
+        & !from_cfrac >= max_cn_quantile_threshold
+      )
+      list(weight, total_weight, cweight, from_cfrac, to_cfrac, is_at_min_quantile_threshold, is_at_max_quantile_threshold)
+    }
+    ,
+    by = gene_name
+  ]
     
-	gene_cn_segments = reord_gene_cn_segments[order(ix)]
+  gene_cn_segments = reord_gene_cn_segments[order(ix)]
 
-	null_out_columns = c("ix")
-	for (col in null_out_columns) {
-		gene_cn_segments[[col]] = NULL
-	}
+  null_out_columns = c("ix")
+  for (col in null_out_columns) {
+    gene_cn_segments[[col]] = NULL
+  }
 
 
     gene_cn_table = gene_cn_segments[, `:=`(
       max_normalized_cn = max(normalized_cn, na.rm = TRUE),
       max_cn = max(cn, na.rm = TRUE),
-	  max_quantile_cn = cn[is_at_max_quantile_threshold],
-	  max_quantile_normalized_cn = normalized_cn[is_at_max_quantile_threshold],
+    max_quantile_cn = cn[is_at_max_quantile_threshold],
+    max_quantile_normalized_cn = normalized_cn[is_at_max_quantile_threshold],
       min_normalized_cn = min(normalized_cn, na.rm = TRUE),
       min_cn = min(cn, na.rm = TRUE),
-	  min_quantile_cn = cn[is_at_min_quantile_threshold],
-	  min_quantile_normalized_cn = normalized_cn[is_at_min_quantile_threshold],
+    min_quantile_cn = cn[is_at_min_quantile_threshold],
+    min_quantile_normalized_cn = normalized_cn[is_at_min_quantile_threshold],
       avg_normalized_cn = sum(normalized_cn * width, na.rm = TRUE) / sum(width),
       avg_cn = sum(cn * width, na.rm = TRUE) / sum(width),
       # total_node_width = sum(width, na.rm = TRUE),
@@ -780,12 +780,12 @@ get_gene_ampdels_from_jabba <- function(jab, pge, amp.thresh = 4, del.thresh = 0
       .(
         max_normalized_cn = max_normalized_cn[1],
         max_cn = max_cn[1],
-		max_quantile_cn = max_quantile_cn[1],
-		max_quantile_normalized_cn = max_quantile_normalized_cn[1],
+    max_quantile_cn = max_quantile_cn[1],
+    max_quantile_normalized_cn = max_quantile_normalized_cn[1],
         min_normalized_cn = min_normalized_cn[1],
         min_cn = min_cn[1],
-		min_quantile_cn = min_quantile_cn[1],
-		min_quantile_normalized_cn = min_quantile_normalized_cn[1],
+    min_quantile_cn = min_quantile_cn[1],
+    min_quantile_normalized_cn = min_quantile_normalized_cn[1],
         avg_normalized_cn = avg_normalized_cn[1],
         avg_cn = avg_cn[1],
         number_of_cn_segments = number_of_cn_segments[1],
@@ -822,8 +822,8 @@ collect_copy_number_jabba <- function(
     del.thresh,
     verbose = TRUE,
     karyograph = NULL,
-	min_cn_quantile_threshold = 0.1,
-	max_cn_quantile_threshold = 0.9) {
+  min_cn_quantile_threshold = 0.1,
+  max_cn_quantile_threshold = 0.9) {
   if (is.null(jabba_rds) || !file.exists(jabba_rds)) {
     if (verbose) message("Jabba RDS file is missing or does not exist.")
     return(data.table(type = NA, source = "jabba_rds"))
@@ -858,8 +858,8 @@ collect_copy_number_jabba <- function(
     del.thresh = del.thresh,
     pge = pge,
     nseg = nseg,
-	min_cn_quantile_threshold = min_cn_quantile_threshold,
-	max_cn_quantile_threshold = max_cn_quantile_threshold
+  min_cn_quantile_threshold = min_cn_quantile_threshold,
+  max_cn_quantile_threshold = max_cn_quantile_threshold
   )
 
   if (nrow(scna)) {
@@ -998,8 +998,8 @@ collect_oncokb_cna <- function(oncokb_cna, jabba_gg, pge, amp.thresh, del.thresh
       del.thresh = del.thresh,
       pge = pge,
       nseg = nseg,
-	  min_cn_quantile_threshold = 0.1, 
-	  max_cn_quantile_threshold = 0.9
+    min_cn_quantile_threshold = 0.1, 
+    max_cn_quantile_threshold = 0.9
   ) 
 
   matches = list(
@@ -1106,7 +1106,6 @@ collect_oncokb_fusions <- function(oncokb_fusions, pge, cytoband, verbose = TRUE
     if (!NROW(non_silent_fusions) > 0) {
       return(out)
     }
-
     nm = tolower(names(non_silent_fusions))
     ixcol = which(nm %in% "fusion")
     nr_ixcol = NROW(ixcol)
@@ -1344,11 +1343,11 @@ collect_oncokb <- function(oncokb_maf, multiplicity = NA_character_, verbose = T
   is_multiplicity_populated = FALSE
   if (is_multiplicity_present) {
     multiplicity <- readRDS(multiplicity)
-	  is_multiplicity_populated = NROW(multiplicity) > 0
+    is_multiplicity_populated = NROW(multiplicity) > 0
   }
 
   if (is_oncokb_populated && !is_multiplicity_populated) {
-  	stop("Something's off - oncokb is populated with variants, but not multiplicity.")
+    stop("Something's off - oncokb is populated with variants, but not multiplicity.")
   }
   
   if (is_oncokb_populated && is_multiplicity_populated) {
@@ -1369,7 +1368,7 @@ collect_oncokb <- function(oncokb_maf, multiplicity = NA_character_, verbose = T
       )
     })
     multiplicity = multiplicity[order_ix_multiplicity]
-  	oncokb <- merge_oncokb_multiplicity(oncokb, multiplicity, overwrite = TRUE)
+    oncokb <- merge_oncokb_multiplicity(oncokb, multiplicity, overwrite = TRUE)
     oncokb = Skilift:::annotate_multihit(oncokb)
   }
 
@@ -1404,7 +1403,7 @@ collect_oncokb <- function(oncokb_maf, multiplicity = NA_character_, verbose = T
     )
 
       ## oncokb$snpeff_ontology <- snpeff_ontology$short[match(oncokb$Consequence, snpeff_ontology$eff)]
-	
+  
     oncokb$short <- dplyr::case_when(
       grepl("frameshift", oncokb$Consequence) & grepl("fs$", oncokb$HGVSp) ~ "trunc",
       grepl("stop", oncokb$Consequence) & grepl("^p\\.", oncokb$HGVSp) ~ "trunc",
@@ -1913,15 +1912,34 @@ oncotable <- function(
     ) {
   out <- data.table()
 
+  ## if ("type" %in% names(mcols(gencode))) {
+  ##     pge <- gencode %Q% (type == "gene" & gene_type == "protein_coding")
+  ## } else {
+  ##   pge <- gencode %Q% (gene_type == "protein_coding")
+  ## }
+
+  
   if ("type" %in% names(mcols(gencode))) {
-    pge <- gencode %Q% (type == "gene" & gene_type == "protein_coding")
+    ## pge <- gencode %Q% (type == "gene" & gene_type == "protein_coding")
+    pge = (
+      gencode
+      %Q% (type == "gene")
+      %Q% (order(
+        GenomeInfoDb::rankSeqlevels(as.character(seqnames)),
+        -rank(width))
+      ) %Q% (!duplicated(gene_name))
+    )
   } else {
     pge <- gencode %Q% (gene_type == "protein_coding")
   }
 
+
+
+
   ## collect gene fusions
   # prefer fusions from oncokb
   if (!is.na(oncokb_fusions) && !is.null(oncokb_fusions) && file.exists(oncokb_fusions)) {
+      ## FIXME: the logic to grab coordinates doesn't make sense for fusions. Should take into account the actual junction + gene name..
     out <- rbind(
       out,
       collect_oncokb_fusions(oncokb_fusions, pge, cytoband, verbose),

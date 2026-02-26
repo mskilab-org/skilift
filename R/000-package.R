@@ -16,7 +16,7 @@ PAIRED_READS_FACTOR = 2
 #' 
 #' To get binned coverage into read length level coverage,
 #' multiply by read length (151)
-READ_LENGTH = 151
+READ_LENGTH = getOption("skilift_read_length", 151)
 
 #' Snpeff Protein Coding Annotations
 #' 

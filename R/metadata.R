@@ -1311,16 +1311,16 @@ add_coverage_parameters <- function(metadata, tumor_coverage, field = "foregroun
             warning("Purity and ploidy not found in metadata, cov_slope and cov_intercept will not be calculated")
         }
         cov <- tumor_coverage %>% readRDS()
-		coverage_values = base::get0(field, as.environment(as.list(mcols(cov))), ifnotfound = NULL)
-		lst_cov_bool = Skilift::test_coverage_normalized(coverage_values)
-		is_cov_likely_normalized = lst_cov_bool$is_cov_likely_normalized
-		is_cov_near_one = lst_cov_bool$is_cov_near_one
-		if (!is_cov_likely_normalized && !is_cov_near_one) {
-			message("Assuming coverage is in read coverage per bin and paired end, 151 bp reads, rescaling")
-			mcols(cov)[[field]] = coverage_values * PAIRED_READS_FACTOR * READ_LENGTH / width(cov)
-		} else {
-			message("Assuming coverage is mean-normalized, ignoring rescaling to base coverage")
-		}
+        coverage_values = base::get0(field, as.environment(as.list(mcols(cov))), ifnotfound = NULL)
+        lst_cov_bool = Skilift::test_coverage_normalized(coverage_values)
+        is_cov_likely_normalized = lst_cov_bool$is_cov_likely_normalized
+        is_cov_near_one = lst_cov_bool$is_cov_near_one
+        if (!is_cov_likely_normalized && !is_cov_near_one) {
+            message("Assuming coverage is in read coverage per bin and paired end, ", getOption("skilift_read_length", 151), " bp reads, rescaling")
+            mcols(cov)[[field]] = coverage_values * PAIRED_READS_FACTOR * getOption("skilift_read_length", 151) / width(cov)
+        } else {
+            message("Assuming coverage is mean-normalized, ignoring rescaling to base coverage")
+        }
         # mcols(cov)[[field]] <- mcols(cov)[, field] * 2 * 151 / width(cov)
         rel2abs.cov <- skitools::rel2abs(cov,
             field = field,
@@ -1676,7 +1676,7 @@ create_metadata <- function(
     seqnames_genome_width_or_genome_length = c(1:22, "X", "Y"),
     denoised_coverage_field = "foreground",
     is_visible = TRUE,
-	summary = NULL,
+    summary = NULL,
     conpair_contamination = NULL,
     conpair_concordance = NULL,
     cohort_type = NULL,
@@ -1759,7 +1759,7 @@ create_metadata <- function(
 
     metadata = process_qc_flag(metadata, qc_flags_config)
 
-	metadata$summary = summary
+    metadata$summary = summary
 
     lstix = seq_len(NROW(added_field_values))
     for (ii in lstix) {
@@ -1809,8 +1809,8 @@ lift_metadata <- function(
     all_cols <- c(
         "pair", "tumor_type", "tumor_details", "disease", "primary_site", "inferred_sex",
         # "jabba_gg", 
-		jabba_column,
-		"events", "oncokb_snv", "somatic_snvs", "germline_snvs", "tumor_coverage",
+        jabba_column,
+        "events", "oncokb_snv", "somatic_snvs", "germline_snvs", "tumor_coverage",
         "estimate_library_complexity", "alignment_summary_metrics",
         "insert_size_metrics", "tumor_wgs_metrics", "normal_wgs_metrics",
         "het_pileups", "activities_sbs_signatures", "activities_indel_signatures",
@@ -1851,25 +1851,25 @@ lift_metadata <- function(
         if (is_oncokb_present) {
             snvs_column = row$oncokb_snv
         }
-		
-		inferred_sex_field = row$inferred_sex
+        
+        inferred_sex_field = row$inferred_sex
 
-		purple_qc_path_for_fread = row$purple_qc
-		is_purple_qc_null = is.null(purple_qc_path_for_fread) 
-		is_purple_pp_range_null = is.null(row$purple_pp_range)
-		extracted_purple_qc_path = character(0)
-		if (!is_purple_pp_range_null) {
-			extracted_purple_qc_path = dir(dirname(as.character(row$purple_pp_range)), full.names = TRUE, pattern = ".qc$")
-		}
-		if (is_purple_qc_null && NROW(extracted_purple_qc_path) > 0) {
-			purple_qc_path_for_fread = extracted_purple_qc_path[1]
-		}
-		
-		is_purple_qc_path_valid = NROW(purple_qc_path_for_fread) == 1 && is.character(purple_qc_path_for_fread) && file.exists(purple_qc_path_for_fread)
-		if (is_purple_qc_path_valid) {
-			inferred_sex_field = fread(purple_qc_path_for_fread, header = FALSE)[V1 == "AmberGender"]$V2
-			inferred_sex_field = tools::toTitleCase(tolower(inferred_sex_field))
-		}
+        purple_qc_path_for_fread = row$purple_qc
+        is_purple_qc_null = is.null(purple_qc_path_for_fread) 
+        is_purple_pp_range_null = is.null(row$purple_pp_range)
+        extracted_purple_qc_path = character(0)
+        if (!is_purple_pp_range_null) {
+            extracted_purple_qc_path = dir(dirname(as.character(row$purple_pp_range)), full.names = TRUE, pattern = ".qc$")
+        }
+        if (is_purple_qc_null && NROW(extracted_purple_qc_path) > 0) {
+            purple_qc_path_for_fread = extracted_purple_qc_path[1]
+        }
+        
+        is_purple_qc_path_valid = NROW(purple_qc_path_for_fread) == 1 && is.character(purple_qc_path_for_fread) && file.exists(purple_qc_path_for_fread)
+        if (is_purple_qc_path_valid) {
+            inferred_sex_field = fread(purple_qc_path_for_fread, header = FALSE)[V1 == "AmberGender"]$V2
+            inferred_sex_field = tools::toTitleCase(tolower(inferred_sex_field))
+        }
 
         lstix = seq_len(NROW(added_fields))
         added_fields_lst = list()
@@ -1944,7 +1944,7 @@ lift_metadata <- function(
                 null = "null"
             )
 
-			return(metadata)
+            return(metadata)
             
         }, error = function(e) {
             print(sprintf("Error processing %s: %s", row$pair, e$message))
@@ -1952,8 +1952,8 @@ lift_metadata <- function(
         })
     }, mc.cores = cores, mc.preschedule = TRUE)
 
-	metadata_tbls = rbindlist(list_metadata, fill = TRUE)
-	cohort$inputs = Skilift::merge.repl(cohort$inputs, metadata_tbls, by = "pair", prefer_x = FALSE, prefer_y = TRUE)
+    metadata_tbls = rbindlist(list_metadata, fill = TRUE)
+    cohort$inputs = Skilift::merge.repl(cohort$inputs, metadata_tbls, by = "pair", prefer_x = FALSE, prefer_y = TRUE)
 
     # invisible(NULL)
 
@@ -1962,7 +1962,7 @@ lift_metadata <- function(
     if (do_lift_datafiles_json && TRUE) ## excessive checking to make sure nothing dumb happens
         Skilift::lift_datafiles_json(output_data_dir = output_data_dir, cores = cores)
     
-	return(cohort)
+    return(cohort)
 }
 
 #' @name lift_datafiles_json

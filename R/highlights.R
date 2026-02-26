@@ -607,7 +607,7 @@ create_summary = function(
   hemedb_guideline = hemedb_guideline[, .(GUIDELINE = GUIDELINE[1], DISEASE = list(DISEASE)), by = GENE]
 
   criterias = list(
-    is_tier_or_better = small_muts$Tier <= 2
+    is_tier_or_better = !is.na(small_muts$Tier) & small_muts$Tier <= 2
    ,
     is_clonal = is.na(small_muts$estimated_altered_copies) | small_muts$estimated_altered_copies >= altered_copies_threshold
   , # allow NA's through
@@ -698,7 +698,7 @@ create_summary = function(
 
   any_svs_in_guidelines = length(intersect(fg, sv_recurrent_map)) > 0 ## accounts for merge step later
   criterias = list(
-    is_tier2_or_better = svs$Tier <= 2,
+    is_tier2_or_better = !is.na(svs$Tier) &  svs$Tier <= 2,
 	  is_svs_in_guidelines = fg %in% sv_recurrent_map
   )
   if (!cohort_type == "heme") {
@@ -730,7 +730,7 @@ create_summary = function(
   cna = events_tbl[grepl("SCNA", events_tbl$type, ignore.case = TRUE),]
   cna_parsed = ""
   criterias = list(
-    is_tier_or_better = cna$Tier <= 2,
+    is_tier_or_better = !is.na(cna$Tier) & cna$Tier <= 2,
 	is_cna_in_guidelines = cna$gene %in% hemedb_guideline$GENE
   )
   if (!cohort_type == "heme") {
