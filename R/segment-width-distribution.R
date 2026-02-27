@@ -19,7 +19,7 @@ get_segstats <- function(
     coverage_field = "foreground",
     settings = Skilift:::default_settings_path,
     ref = "hg19",
-    max_na = 0.9,
+    max_na = 100000,
     cores = 1) {
     #' drcln_cov = readRDS(thisp$decomposed_cov[i])
     ## make this work with complex where the cov file was not an input and with jabba_gg
