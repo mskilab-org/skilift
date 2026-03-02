@@ -60,6 +60,8 @@ get_ref_metadata <- function(ref_seqinfo_json, ref = NULL) {
 #' @param mask (logical) whether to mask the coverage data (default: TRUE)
 #' @param mask.path path to mask file (default: system.file("extdata", "data", "maskA_re.rds", package = "Skilift"))
 #' @param ... additional arguments to pass to cov2cov.js
+#' @param arrow_x_type arrow type function for x values (default: arrow::float32)
+#' @param arrow_y_type arrow type function for y values (default: arrow::float32)
 #' @return arrow table
 #' @author Alon Shaiber, Shihab Dider
 granges_to_arrow_scatterplot <- function(
@@ -71,6 +73,9 @@ granges_to_arrow_scatterplot <- function(
     bin.width = 1e4,
     mask = TRUE,
     mask.path = system.file("extdata", "data", "maskA_re.rds", package = "Skilift"),
+    arrow_x_type = arrow::float32,
+    arrow_y_type = arrow::float32,
+
     ...) {
     if (!requireNamespace("arrow", quietly = TRUE)) {
         stop('You must have the package "arrow" installed in order for this function to work. Please install it.')
@@ -106,6 +111,7 @@ granges_to_arrow_scatterplot <- function(
         ref = ref,
         cov.color.field = cov.color.field,
         bin.width = bin.width,
+        rebin_fun = sum,
         ...
     )
 
@@ -136,8 +142,10 @@ granges_to_arrow_scatterplot <- function(
     arrow_table <- arrow::Table$create(
         outdt,
         schema = arrow::schema(
-            x = arrow::float32(),
-            y = arrow::float32(),
+            # x = arrow::float32(),
+            # y = arrow::float32(),
+            x = arrow_x_type(),
+            y = arrow_y_type(),
             color = arrow::float32()
         )
     )
@@ -297,18 +305,17 @@ lift_denoised_coverage <- function(
         tryCatchLog(
             {
                 if (!is.null(row$tumor_coverage) && file.exists(row$tumor_coverage)) {
-
                     cov <- row$tumor_coverage %>% readRDS()
-					coverage_values = base::get(row$denoised_coverage_field, as.environment(as.list(mcols(cov))))
-					lst_cov_bool = Skilift::test_coverage_normalized(coverage_values)
-					is_cov_likely_normalized = lst_cov_bool$is_cov_likely_normalized
-					is_cov_near_one = lst_cov_bool$is_cov_near_one
-					if (!is_cov_likely_normalized && !is_cov_near_one) {
-						message("Assuming coverage is in read coverage per bin and paired end, 151 bp reads, rescaling")
-						mcols(cov)[[row$denoised_coverage_field]] = coverage_values * PAIRED_READS_FACTOR * READ_LENGTH / width(cov)
-					} else {
-						message("Assuming coverage is mean-normalized, ignoring rescaling to base coverage")
-					}
+                    coverage_values = base::get(row$denoised_coverage_field, as.environment(as.list(mcols(cov))))
+                    lst_cov_bool = Skilift::test_coverage_normalized(coverage_values)
+                    is_cov_likely_normalized = lst_cov_bool$is_cov_likely_normalized
+                    is_cov_near_one = lst_cov_bool$is_cov_near_one
+                    if (!is_cov_likely_normalized && !is_cov_near_one) {
+                        message("Assuming coverage is in read coverage per bin and paired end, ", getOption("skilift_read_length", 151L),  " bp reads, rescaling")
+                        mcols(cov)[[row$denoised_coverage_field]] = coverage_values * PAIRED_READS_FACTOR * getOption("skilift_read_length", 151L) / width(cov)
+                    } else {
+                        message("Assuming coverage is mean-normalized, ignoring rescaling to base coverage")
+                    }
                     # mcols(cov)[[row$denoised_coverage_field]] <- mcols(cov)[, row$denoised_coverage_field] * 2 * 151 / width(cov)
                                         
                     # Create arrow table

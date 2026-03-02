@@ -8,7 +8,11 @@ create_summary(
   events_tbl,
   altered_copies_threshold = 0.1,
   cohort_type,
-  cohorttuple
+  cohorttuple,
+  show_all_tags = FALSE,
+  show_all_small_muts_tags = FALSE,
+  show_all_cna_tags = FALSE,
+  show_all_svs_tags = FALSE
 )
 }
 \description{
