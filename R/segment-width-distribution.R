@@ -1061,6 +1061,69 @@ lift_pp_plot <- function(cohort, output_data_dir, cores = 1) {
 }
 
 
+#' @name ppfit_explorer
+#' @title ppfit_explorer
+#' @description
+#' Launch an interactive Shiny app for assessing purity/ploidy copy-number fits.
+#'
+#' The app computes per-segment coverage statistics (via \code{get_segstats})
+#' from a balanced JaBbA gGraph and tumor coverage file, then displays a
+#' segment-width-weighted histogram with draggable purity/ploidy sliders that
+#' control where integer-CN state lines fall.  Use it to visually confirm
+#' whether the JaBbA fit is correct or to explore alternative purity/ploidy
+#' values.
+#'
+#' Two view modes are available:
+#' \itemize{
+#'   \item \strong{Normalized coverage}: histogram is fixed; vertical CN lines
+#'         move as you adjust the sliders.
+#'   \item \strong{Estimated CN}: histogram shifts with the sliders; integer CN
+#'         lines stay fixed — peaks aligning with integers indicate a good fit.
+#' }
+#'
+#' @param jabba_path  (character) Optional path to a balanced JaBbA gGraph RDS.
+#'   Pre-populates the file input and loads data automatically if both paths are
+#'   supplied.
+#' @param coverage_path (character) Optional path to a tumor coverage GRanges
+#'   RDS.  Pre-populates the file input.
+#' @param coverage_field (character) Coverage field to use (default
+#'   \code{"foreground"}).
+#' @param ... Additional arguments passed to \code{shiny::runApp()}.
+#' @return Invisible NULL (called for its side-effect of launching the app).
+#' @export
+ppfit_explorer <- function(jabba_path    = NULL,
+                           coverage_path = NULL,
+                           coverage_field = "foreground",
+                           ...) {
+    app_dir <- system.file("shiny", "ppfit_explorer", package = "Skilift")
+    if (!nzchar(app_dir) || !dir.exists(app_dir)) {
+        stop("Shiny app directory not found. Re-install the Skilift package.")
+    }
+
+    ## Pass file paths into the app via environment variables so the UI can
+    ## pre-populate the text inputs on startup.
+    old_env <- list(
+        SKILIFT_JABBA_PATH     = Sys.getenv("SKILIFT_JABBA_PATH",     unset = NA),
+        SKILIFT_COVERAGE_PATH  = Sys.getenv("SKILIFT_COVERAGE_PATH",  unset = NA),
+        SKILIFT_COVERAGE_FIELD = Sys.getenv("SKILIFT_COVERAGE_FIELD", unset = NA)
+    )
+    on.exit({
+        for (nm in names(old_env)) {
+            val <- old_env[[nm]]
+            if (is.na(val)) Sys.unsetenv(nm) else Sys.setenv(nm, val)
+        }
+    }, add = TRUE)
+
+    if (!is.null(jabba_path))
+        Sys.setenv(SKILIFT_JABBA_PATH     = jabba_path)
+    if (!is.null(coverage_path))
+        Sys.setenv(SKILIFT_COVERAGE_PATH  = coverage_path)
+    Sys.setenv(SKILIFT_COVERAGE_FIELD = coverage_field)
+
+    shiny::runApp(app_dir, ...)
+}
+
+
 #' @name pp_plot
 #' @title pp_plot
 #'
