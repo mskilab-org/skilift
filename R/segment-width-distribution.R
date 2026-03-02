@@ -1113,7 +1113,7 @@ ppfit_explorer <- function(jabba_path    = NULL,
     if (!is.null(coverage_path))
         Sys.setenv(SKILIFT_COVERAGE_PATH  = coverage_path)
     Sys.setenv(SKILIFT_COVERAGE_FIELD = coverage_field)
-
+    browser()
     shiny::runApp(app_dir, ...)
 }
 

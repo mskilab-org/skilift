@@ -192,6 +192,7 @@ server <- function(input, output, session) {
                     mutl <- sum(mu * w, na.rm = TRUE)
                     segstats_dt[, mean := mu * (sw / mutl)]
                 } else {
+                    browser()
                     segstats_dt <- Skilift::get_segstats(
                         balanced_jabba_gg = jabba_path,
                         tumor_coverage    = coverage_path,
@@ -318,7 +319,8 @@ server <- function(input, output, session) {
                     geom_vline(data = jlines,
                                aes(xintercept = coverage),
                                color = "grey60", linetype = "dotted",
-                               linewidth = 0.5, alpha = 0.7)
+                               linewidth = 0.5, alpha = 0.7,
+                               inherit.aes = FALSE)
             }
 
             # Current fit lines (red dashed)
@@ -326,11 +328,13 @@ server <- function(input, output, session) {
                 geom_vline(data = lines,
                            aes(xintercept = coverage),
                            color = "#e15759", linetype = "dashed",
-                           linewidth = 0.65) +
+                           linewidth = 0.65,
+                           inherit.aes = FALSE) +
                 geom_text(data = lines,
                           aes(x = coverage, label = cn),
                           y = Inf, vjust = 1.4, hjust = -0.25,
-                          size = 3.2, color = "#e15759", fontface = "bold") +
+                          size = 3.2, color = "#e15759", fontface = "bold",
+                          inherit.aes = FALSE) +
                 coord_cartesian(xlim = c(xlim_lo, xlim_hi)) +
                 labs(
                     title = sprintf(
@@ -358,6 +362,7 @@ server <- function(input, output, session) {
             dt_plot <- dt_plot[is.finite(est_cn) &
                                est_cn >= -0.5 & est_cn <= (mcn + 0.5)]
 
+            browser()
             g <- ggplot(dt_plot, aes(x = est_cn, weight = .data[[wt_col]])) +
                 geom_histogram(bins = input$n_bins,
                                fill = "#4e79a7", color = NA, alpha = 0.85) +
