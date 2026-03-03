@@ -12,7 +12,8 @@ lift_multiplicity(
     "variant.p", "vaf", "transcript_type", "impact", "rank"),
   field = "altered_copies",
   show_only_oncokb = TRUE,
-  cores = 1
+  cores = 1,
+  custom_annotation_fields = list(custom_field = NULL)
 )
 }
 \arguments{

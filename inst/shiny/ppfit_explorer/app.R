@@ -192,7 +192,7 @@ server <- function(input, output, session) {
                     mutl <- sum(mu * w, na.rm = TRUE)
                     segstats_dt[, mean := mu * (sw / mutl)]
                 } else {
-                    browser()
+                    
                     segstats_dt <- Skilift::get_segstats(
                         balanced_jabba_gg = jabba_path,
                         tumor_coverage    = coverage_path,
@@ -362,7 +362,7 @@ server <- function(input, output, session) {
             dt_plot <- dt_plot[is.finite(est_cn) &
                                est_cn >= -0.5 & est_cn <= (mcn + 0.5)]
 
-            browser()
+            
             g <- ggplot(dt_plot, aes(x = est_cn, weight = .data[[wt_col]])) +
                 geom_histogram(bins = input$n_bins,
                                fill = "#4e79a7", color = NA, alpha = 0.85) +

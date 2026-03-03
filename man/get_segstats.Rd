@@ -10,7 +10,7 @@ get_segstats(
   coverage_field = "foreground",
   settings = Skilift:::default_settings_path,
   ref = "hg19",
-  max_na = 0.9,
+  max_na = 1e+05,
   cores = 1
 )
 }
