@@ -6,6 +6,7 @@
 \usage{
 add_basic_metadata(
   metadata,
+  input_tumor_category,
   input_tumor_type,
   input_tumor_details,
   input_disease,
@@ -15,17 +16,19 @@ add_basic_metadata(
 \arguments{
 \item{metadata}{A data.table containing metadata.}
 
-\item{tumor_type}{The type of tumor.}
+\item{input_tumor_category}{The category of the tumor.}
 
-\item{tumor_details}{Details about the tumor.}
+\item{input_tumor_type}{The type of tumor.}
 
-\item{disease}{The disease associated with the sample.}
+\item{input_tumor_details}{Details about the tumor.}
 
-\item{primary_site}{The primary site of the tumor.}
+\item{input_disease}{The disease associated with the sample.}
+
+\item{input_primary_site}{The primary site of the tumor.}
 }
 \value{
 Updated metadata with basic information added.
 }
 \description{
-Adds basic metadata information such as tumor type, tumor details, disease, and primary site.
+Adds basic metadata information such as tumor category, tumor type, tumor details, disease, and primary site.
 }

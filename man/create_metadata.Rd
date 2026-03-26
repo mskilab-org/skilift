@@ -97,9 +97,39 @@ create_metadata(
 
 \item{seqnames_genome_width_or_genome_length}{Sequence names and genome width in list or genome length as a numeric}
 
-\item{wgs_metrics}{Path to the wgs_metrics file.}
-
 \item{signatures_pair_name}{The name of the signature pair.}
+
+\item{purple_pp_bestFit}{The best fit purity and ploidy from Purple.}
+
+\item{foreground_col_name}{The name of the column in the coverage data to use for foreground coverage.}
+
+\item{tumor_wgs_metrics}{Path to tumor WGS metrics file.}
+
+\item{normal_wgs_metrics}{Path to normal WGS metrics file.}
+
+\item{decomposed_indel_signatures}{Decomposed indel signatures.}
+
+\item{activities_indel_signatures}{Activities of indel signatures.}
+
+\item{deconstructsigs_sbs_signatures}{DeconstructSigs SBS signatures.}
+
+\item{decomposed_sbs_signatures}{Decomposed SBS signatures.}
+
+\item{denoised_coverage_field}{The field in the coverage data to use for denoised coverage.}
+
+\item{is_visible}{Boolean indicating if the sample should be visible in the frontend.}
+
+\item{summary}{A summary of the sample.}
+
+\item{conpair_contamination}{Contamination estimate from Conpair.}
+
+\item{conpair_concordance}{Concordance estimate from Conpair.}
+
+\item{cohort_type}{The type of cohort the sample belongs to ("paired", "heme", "tumor_only").}
+
+\item{qc_flags_config}{Configuration for quality control flags.}
+
+\item{added_field_values}{A list of additional field values to add to the metadata.}
 }
 \value{
 A data.table containing the metadata for a single sample pair.
