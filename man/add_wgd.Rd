@@ -6,8 +6,7 @@
 \usage{
 add_wgd(
   metadata,
-  allelic_jabba_gg = NULL,
-  input_wgd = NULL
+  allelic_jabba_gg = NULL
 )
 }
 \arguments{
@@ -21,5 +20,5 @@ add_wgd(
 Updated metadata with WGD value added
 }
 \description{
-Use the WGD value provided. Otherwise, calculates and adds Whole Genome Doubling (WGD) to the metadata.
+Calculates and adds Whole Genome Doubling (WGD) to the metadata.
 }

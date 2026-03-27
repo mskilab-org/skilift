@@ -10,7 +10,6 @@ add_tmb(
   jabba_gg = NULL,
   genome = "hg19",
   seqnames_genome_width_or_genome_length = c(1:22, "X", "Y")
-  input_tmb = NULL
 )
 }
 \arguments{
@@ -23,12 +22,10 @@ add_tmb(
 \item{genome}{The genome reference used}
 
 \item{seqnames_genome_width_or_genome_length}{Sequence names for genome width calculation}
-
-\item{input_tmb}{Precomputed TMB values}
 }
 \value{
 Updated metadata with TMB value added
 }
 \description{
-Use the TMB value provided. Otherwise, calculates and adds tumor mutation burden (TMB) to the metadata based on SNV count and genome length.
+Calculates and adds tumor mutation burden (TMB) to the metadata based on SNV count and genome length.
 }

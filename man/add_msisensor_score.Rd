@@ -10,12 +10,10 @@ add_msisensor_score(metadata, msisensorpro)
 \item{metadata}{A data.table containing metadata.}
 
 \item{msisensor_pro}{Path to MSIsensor profile file.}
-
-\item{input_msi}{Precomputed MS categories.}
 }
 \value{
 Updated metadata with MSIsensor score added.
 }
 \description{
-Use MSI information if provided, or adds MSIsensor score to the metadata.
+Adds MSIsensor score to the metadata.
 }

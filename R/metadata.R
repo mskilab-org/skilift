@@ -58,16 +58,7 @@ initialize_metadata_columns <- function(pair) {
 
         # Contamination
         conpair_contamination = NA_real_,
-        conpair_concordance = NA_real_,
-
-        # Treatment metrics
-        age_at_biopsy = NA_character_,
-        treatment_lines = NA_character_,
-        n_treatment_lines = NA_character_,
-        best_treatment = NA_character_,
-        best_treatment_response = NA_character_,
-        best_treatment_mechanism = NA_character_,
-        best_treatment_PFS_duration = NA_character_
+        conpair_concordance = NA_real_
     )
     return(dt)
 }
@@ -1278,39 +1269,6 @@ add_genome_length <- function(
     return(metadata)
 }
 
-#' @name add_sv_columns
-#' @title Add Structural Variant Columns
-#' @description Adds a column for each of the structural variant categories from JaBbA complex graph
-#' @param metadata A data.table containing metadata
-#' @param complex Path to complex events RDS file
-#' @return Updated metadata with columns showing the counts of each SV type
-add_sv_columns <- function(metadata, complex = NULL) {
-    event.cols = c("del", "bfb", "tyfonas", "dm", "rigma", "pyrgo",
-    "tra", "tic", "inv", "dup", "invdup", "chromothripsis",
-    "chromoplexy", "qrppos", "qrpmin", "qrpmix", "cpxdm")
-
-    if (!is.null(complex)) {
-        complex_gg <- process_jabba(complex)
-        events.dt = complex_gg$meta$events
-        if (NROW(events.dt) > 0) {
-            tmp.dt = events.dt[, .N, by = type]
-            events.wide.dt = dcast(tmp.dt, . ~ type, value.var = "N", fill = 0)
-            missing.cols = setdiff(event.cols, names(events.wide.dt))
-            events.wide.dt[, missing.cols] = 0
-            events.wide.dt = events.wide.dt[, event.cols, with = FALSE]
-        } else {
-            warning("No events found in JaBbA complex graph, filling SV type columns with 0.")
-            events.wide.dt = as.data.table(setNames(as.list(rep(0, length(event.cols))), event.cols))
-        }
-    } else {
-        warning("JaBbA complex graph not provided, filling SV type columns with NAs.")
-        events.wide.dt = as.data.table(setNames(as.list(rep(NA_integer_, length(event.cols))), event.cols))
-    }
-    setnames(events.wide.dt, "dm", "ecDNA")
-    metadata = cbind(metadata, events.wide.dt)
-    return(metadata)
-}
-
 #' @name add_sv_types
 #' @title Add Structural Variant Types
 #' @description Adds counts of different SV types from JaBbA graph and complex events
@@ -1420,31 +1378,21 @@ add_het_pileups_parameters <- function(metadata, het_pileups) {
 #' @name add_tmb
 #' @title Add Tumor Mutation Burden
 #' @description
-#' Use the TMB value provided. Otherwise, calculates and adds tumor mutation burden (TMB) to the metadata based on SNV count and genome length.
+#' Calculates and adds tumor mutation burden (TMB) to the metadata based on SNV count and genome length.
 #'
 #' @param metadata A data.table containing metadata
 #' @param somatic_snvs Path to somatic SNV VCF file
 #' @param jabba_gg Path to JaBbA graph RDS file
 #' @param genome The genome reference used
 #' @param seqnames_genome_width_or_genome_length Sequence names for genome width calculation
-#' @param input_tmb Precomputed TMB values
 #' @return Updated metadata with TMB value added
 add_tmb <- function(
     metadata,
     somatic_snvs = NULL,
     jabba_gg = NULL,
     genome = "hg19",
-    seqnames_genome_width_or_genome_length = c(1:22, "X", "Y"),
-    input_tmb = NULL
+    seqnames_genome_width_or_genome_length = c(1:22, "X", "Y")
  ) {
-
-    # Use TMB if provided
-    if (!is.null(input_tmb)) {
-        if (!is.numeric(input_tmb) || is.na(input_tmb)) stop("tmb must be numeric or NULL")
-        metadata[, tmb := round(input_tmb, digits = 3)]
-        return(metadata)
-    }
-
     meta_dt <- copy(metadata)
 
     # First ensure we have snv_count
@@ -1644,20 +1592,12 @@ add_hrd_scores <- function(metadata, hrdetect, onenesstwoness) {
 #' @name add_msisensor_score
 #' @title Add MSIsensor Score
 #' @description
-#' Use MSI information if provided, or adds MSIsensor score to the metadata.
+#' Adds MSIsensor score to the metadata.
 #'
 #' @param metadata A data.table containing metadata.
 #' @param msisensor_pro Path to MSIsensor profile file.
-#' @param input_msi Precomputed MS categories.
 #' @return Updated metadata with MSIsensor score added.
-add_msisensor_score <- function(metadata, msisensorpro = NULL, input_msi = NULL) {
-    # Use MSI if provided
-    if (!is.null(input_msi)) {
-        if (!is.character(input_msi) || is.na(input_msi)) stop("msi must be a character or NULL")
-        metadata[, msisensor := input_msi]
-        return(metadata)
-    }
-
+add_msisensor_score <- function(metadata, msisensorpro = NULL) {
     tryCatch({
         if (!is.null(msisensorpro)) {
             msisensor_data <- fread(msisensorpro)
@@ -1687,21 +1627,13 @@ add_msisensor_score <- function(metadata, msisensorpro = NULL, input_msi = NULL)
 #' @name add_wgd
 #' @title Add Whole Genome Doubling
 #' @description
-#' Use the WGD value provided. Otherwise, calculates and adds Whole Genome Doubling (WGD) to the metadata.
+#' Calculates and adds Whole Genome Doubling (WGD) to the metadata.
 #'
 #' @param metadata A data.table containing metadata
 #' @param allelic_jabba_gg Path to allelic JaBbA graph RDS file
-#' @param input_wgd Precomputed WGD value
 #' @return Updated metadata with WGD value added
-add_wgd <- function(metadata, allelic_jabba_gg, input_wgd = NULL)
+add_wgd <- function(metadata, allelic_jabba_gg)
 {
-    # Use WGD if provided
-    if (!is.null(input_wgd)) {
-        if (!is.numeric(input_wgd) || is.na(input_wgd)) stop("wgd must be numeric (1/0) or NULL")
-        metadata[, wgd := input_wgd]
-        return(metadata)
-    }
-
     # Ensure allelic jabba is available
     if(!is.null(metaadata$allelic_jabba_gg) & !is.na(metadata$allelic_jabba_gg)) {
         balanced_gg <- process_jabba(allelic_jabba_gg)
@@ -1719,96 +1651,6 @@ add_wgd <- function(metadata, allelic_jabba_gg, input_wgd = NULL)
         metadata[, wgd := NA_integer_]
     }
     return(metadata)
-}
-
-#' @name add_treatment_metadata
-#' @title Add treatment metadata
-#' @description
-#' Adds treatment metadata information such as age at biopsy, treatment lines, number of different treatment lines, and information about the treatment line with the best response (name, response, mechanism, PFS duration).
-#'
-#' @param metadata A data.table containing metadata.
-#' @param input_age_at_biopsy Age at the biopsy.
-#' @param input_treatment_lines Different treatment lines received.
-#' @param input_n_treatment_lines Number of treatment lines received.
-#' @param input_best_treatment Name of the treatment line with the best response.
-#' @param input_best_treatment_response Best response obtained among the treatment lines.
-#' @param input_best_treatment_mechanism Mechanism of the treatment line with the best response.
-#' @param input_best_treatment_PFS_duration Progression-free survival of the treatment line with the best response.
-#' @return Updated metadata with treatment information added.
-add_treatment_metadata <- function(
-    metadata,
-    input_age_at_biopsy = NULL,
-    input_treatment_lines = NULL,
-    input_n_treatment_lines = NULL,
-    input_best_treatment = NULL,
-    input_best_treatment_response = NULL,
-    input_best_treatment_mechanism = NULL,
-    input_best_treatment_PFS_duration = NULL
-) {
-
-    # Validate and use age_at_biopsy if provided
-    if (!is.null(input_age_at_biopsy)) {
-        if (!is.numeric(input_age_at_biopsy)) {
-            warning("age_at_biopsy must be a number, ignored")
-        } else {
-            metadata[, age_at_biopsy := input_age_at_biopsy]
-        }
-    }
-
-    # Validate and use treatment_lines if provided
-    if (!is.null(input_treatment_lines)) {
-        if (!is.character(input_treatment_lines)) {
-            warning("input_treatment_lines must be a character, ignored")
-        } else {
-            metadata[, treatment_lines := input_treatment_lines]
-        }
-    }
-
-    # Validate and use input_n_treatment_lines if provided
-    if (!is.null(input_n_treatment_lines)) {
-        if (!is.numeric(input_n_treatment_lines)) {
-            warning("input_n_treatment_lines must be a number, ignored")
-        } else {
-            metadata[, n_treatment_lines := input_n_treatment_lines]
-        }
-    }
-
-    # Validate and use input_best_treatment if provided
-    if (!is.null(input_best_treatment)) {
-        if (!is.character(input_best_treatment)) {
-            warning("input_best_treatment must be a character, ignored")
-        } else {
-            metadata[, best_treatment := input_best_treatment]
-        }
-    }
-
-    # Validate and use input_best_treatment_response if provided
-    if (!is.null(input_best_treatment_response)) {
-        if (!is.character(input_best_treatment_response)) {
-            warning("input_best_treatment_response must be a character, ignored")
-        } else {
-            metadata[, best_treatment_response := input_best_treatment_response]
-        }
-    }
-
-    # Validate and use input_best_treatment_mechanism if provided
-    if (!is.null(input_best_treatment_mechanism)) {
-        if (!is.character(input_best_treatment_mechanism)) {
-            warning("input_best_treatment_mechanism must be a character, ignored")
-        } else {
-            metadata[, best_treatment_mechanism := input_best_treatment_mechanism]
-        }
-    }
-
-    # Validate and use input_best_treatment_PFS_duration if provided
-    if (!is.null(input_best_treatment_PFS_duration)) {
-        if (!is.numeric(input_best_treatment_PFS_duration)) {
-            warning("input_best_treatment_PFS_duration must be a number, ignored")
-        } else {
-            metadata[, best_treatment_PFS_duration := input_best_treatment_PFS_duration]
-        }
-    }
-  return(metadata)
 }
 
 #' @title Create Metadata for a Sample
@@ -1956,15 +1798,22 @@ create_metadata <- function(
     metadata <- add_fga(metadata, jabba_gg, seqnames_autosomes)
     metadata <- add_genome_length(metadata, jabba_gg, seqnames_genome_width_or_genome_length)
     metadata <- add_sv_types(metadata, jabba_gg, events)
-    metadata <- add_sv_columns(metadata, complex = events)
     metadata <- add_coverage_parameters(metadata, tumor_coverage, denoised_coverage_field)
     metadata <- add_het_pileups_parameters(metadata, het_pileups)
 
     # Add TMB calculation
-    if (!is.null(cohort_type) && !cohort_type == "heme")
-        # Extract tmb from metadata if added
-        tmb <- if ("tmb" %in% names(metadata)) metadata$tmb else NULL
-        metadata <- add_tmb(metadata, somatic_snvs, jabba_gg, genome, seqnames_genome_width_or_genome_length, tmb)
+    if (!is.null(cohort_type) && cohort_type != "heme") {
+        # Extract tmb from metadata if already provided
+        if ("tmb" %in% names(metadata)) {
+            if (is.null(metadata$tmb) || is.na(metadata$tmb) || !is.numeric(metadata$tmb)) {
+                warning("TMB must be numeric, attempting to calculate it from snv_count and total_genome_length")
+                metadata <- add_tmb(metadata, somatic_snvs, jabba_gg, genome, seqnames_genome_width_or_genome_length)
+            }
+            metadata[, tmb := round(tmb, digits = 3)]
+        } else {
+            metadata <- add_tmb(metadata, somatic_snvs, jabba_gg, genome, seqnames_genome_width_or_genome_length)
+        }
+    }
 
     metadata <- add_signatures(
         metadata,
@@ -1992,29 +1841,37 @@ create_metadata <- function(
     # Add HRD scores
     metadata <- add_hrd_scores(metadata, hrdetect, onenesstwoness)
 
-    # Add WGD
-    # Extract wgd from metadata if added
-    wgd <- if ("wgd" %in% names(metadata)) metadata$wgd else NULL
-    metadata <- add_wgd(metadata, allelic_jabba_gg, wgd)
+    # Add TMB calculation
+    if (!is.null(cohort_type) && cohort_type != "heme") {
+        # Extract tmb from metadata if already provided
+        if ("tmb" %in% names(metadata)) {
+            if (is.null(metadata$tmb) || is.na(metadata$tmb) || !is.numeric(metadata$tmb)) {
+                warning("TMB must be numeric, attempting to calculate it from snv_count and total_genome_length")
+                metadata <- add_tmb(metadata, somatic_snvs, jabba_gg, genome, seqnames_genome_width_or_genome_length)
+            }
+            metadata[, tmb := round(tmb, digits = 3)]
+        } else {
+            metadata <- add_tmb(metadata, somatic_snvs, jabba_gg, genome, seqnames_genome_width_or_genome_length)
+        }
+    }
 
-    # Add MSIsensor score
-    # Extract msi from metadata if added
-    msi <- if ("msi" %in% names(metadata)) metadata$msi else NULL
-    metadata <- add_msisensor_score(metadata, msisensorpro, msi)
-    metadata[, msi := NULL]
+    # Add WGD
+    if ("wgd" %in% names(metadata)) { # Extract wgd from metadata if already provided
+        if (is.null(metadata$wgd) || is.na(metadata$wgd) || !is.numeric(metadata$wgd)) {
+            warning("WGD must be numeric, attempting to calculate it from allelic jabba")
+            metadata <- add_wgd(metadata, allelic_jabba_gg)
+        }
+    }
+
+    # Add MSI
+    if ("msisensor" %in% names(metadata)) { # Extract msi from metadata if already provided
+        if (is.null(metadata$msisensor) || is.na(metadata$msisensor) || !is.character(metadata$msisensor)) {
+            warning("MSI must be a character representing a category, attempting to calculate it from msisensorpro")
+            metadata <- add_msisensor_score(metadata, msisensorpro)
+        }
+    }
 
     metadata <- add_conpair(metadata = metadata, conpair_contamination = conpair_contamination, conpair_concordance = conpair_concordance)
-
-    # Add treatment metadata
-    # Extract treatment columns from metadata if added
-    age_at_biopsy <- if ("age_at_biopsy" %in% names(metadata)) metadata$age_at_biopsy else NULL
-    treatment_lines <- if ("treatment_lines" %in% names(metadata)) metadata$treatment_lines else NULL
-    n_treatment_lines <- if ("n_treatment_lines" %in% names(metadata)) metadata$n_treatment_lines else NULL
-    best_treatment <- if ("best_treatment" %in% names(metadata)) metadata$best_treatment else NULL
-    best_treatment_response <- if ("best_treatment_response" %in% names(metadata)) metadata$best_treatment_response else NULL
-    best_treatment_mechanism <- if ("best_treatment_mechanism" %in% names(metadata)) metadata$best_treatment_mechanism else NULL
-    best_treatment_PFS_duration <- if ("best_treatment_PFS_duration" %in% names(metadata)) metadata$best_treatment_PFS_duration else NULL
-    metadata <- add_treatment_metadata(metadata, age_at_biopsy, treatment_lines, n_treatment_lines, best_treatment, best_treatment_response, best_treatment_mechanism, best_treatment_PFS_duration)
 
     if (!as.logical(is_visible)) {
         metadata$visible <- FALSE
@@ -2048,14 +1905,7 @@ lift_metadata <- function(
         tumor_category = c("field" = "tumor_category"),
         tmb = c("field" = "tmb"),
         wgd = c("field" = "wgd"),
-        msi = c("field" = "msi"),
-        age_at_biopsy =  c("field" = "age_at_biopsy"),
-        treatment_lines =  c("field" = "treatment_lines"),
-        n_treatment_lines =  c("field" = "n_treatment_lines"),
-        best_treatment = c("field" = "best_treatment"),
-        best_treatment_response =  c("field" = "best_treatment_response"),
-        best_treatment_mechanism =  c("field" = "best_treatment_mechanism"),
-        best_treatment_PFS_duration =  c("field" = "best_treatment_PFS_duration")
+        msisensor = c("field" = "msisensor")
     ),
     added_from_schema = list(Skilift:::template_metadata)
 ) {
