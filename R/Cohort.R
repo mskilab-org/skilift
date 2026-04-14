@@ -206,219 +206,229 @@ Cohort <- R6Class("Cohort",
                           gs4_auth_path = NULL,
                           merge_tumor_type_db = TRUE,
                           params_json_path = NULL,
+                          suppressWarnings = TRUE,
                           ...
                           ) {
-      self$reference_name <- reference_name
+      main = function() {
+        self$reference_name <- reference_name
 
-      # Merge user-provided mapping with default mapping
-      default_col_mapping <- Skilift::default_col_mapping
-      if (!is.null(col_mapping)) {
-        for (col_name in names(col_mapping)) {
-          col_mapping
-          if (col_name %in% names(default_col_mapping)) {
-            # col_mapping goes first to override default_mapping
-            default_col_mapping[[col_name]] <- unique(
-              c(
-                col_mapping[[col_name]],
-                default_col_mapping[[col_name]]
+        # Merge user-provided mapping with default mapping
+        default_col_mapping <- Skilift::default_col_mapping
+        if (!is.null(col_mapping)) {
+          for (col_name in names(col_mapping)) {
+            col_mapping
+            if (col_name %in% names(default_col_mapping)) {
+              # col_mapping goes first to override default_mapping
+              default_col_mapping[[col_name]] <- unique(
+                c(
+                  col_mapping[[col_name]],
+                  default_col_mapping[[col_name]]
+                )
               )
-            )
-          } else {
-            default_col_mapping[[col_name]] <- col_mapping[[col_name]]
+            } else {
+              default_col_mapping[[col_name]] <- col_mapping[[col_name]]
+            }
           }
         }
-      }
 
-      self$path_patterns <- path_patterns
+        self$path_patterns <- path_patterns
 
-      self$cohort_cols_to_x_cols <- default_col_mapping
+        self$cohort_cols_to_x_cols <- default_col_mapping
 
-      is_potential_path = is.character(x) && length(x) == 1 && !all(is.na(x))
-      is_dir = is_potential_path && dir.exists(x)
-      is_output_csv_present_in_dir = is_dir && file.exists(file.path(x, "outputs.csv"))
-      is_output_csv_present = is_potential_path && all(grepl("\\.csv$", x)) && file.exists(x)
-      is_output_csv_provided = is_output_csv_present_in_dir || is_output_csv_present
-      is_tabular = inherits(x, "data.frame")
-      path_to_outputs_csv = NULL
+        is_potential_path = is.character(x) && length(x) == 1 && !all(is.na(x))
+        is_dir = is_potential_path && dir.exists(x)
+        is_output_csv_present_in_dir = is_dir && file.exists(file.path(x, "outputs.csv"))
+        is_output_csv_present = is_potential_path && all(grepl("\\.csv$", x)) && file.exists(x)
+        is_output_csv_provided = is_output_csv_present_in_dir || is_output_csv_present
+        is_tabular = inherits(x, "data.frame")
+        path_to_outputs_csv = NULL
 
-      if (is_output_csv_provided) {
-        if (is_output_csv_present_in_dir) {
-          path_to_outputs_csv = file.path(x, "outputs.csv")
-        } else if (is_output_csv_present) {
-          path_to_outputs_csv = x
+        if (is_output_csv_provided) {
+          if (is_output_csv_present_in_dir) {
+            path_to_outputs_csv = file.path(x, "outputs.csv")
+          } else if (is_output_csv_present) {
+            path_to_outputs_csv = x
+          }
+          dt = data.table(read.csv(path_to_outputs_csv, colClasses = c("patient_id" = "character", "pair" = "character", "patient" = "character")))
+          self$inputs <- private$construct_from_datatable(dt)[]
+        } else if (is_tabular) {
+          self$inputs <- private$construct_from_datatable(x)[]
+        } else if (is_dir) {
+          self$inputs <- private$construct_from_path(x)[]
+          self$nextflow_results_path <- x
+          warning("Cohort initialized from path: ", x, "\n",
+            "This is deprecated! You should use the gosh-cli to generate an outputs.csv file and then read it in using Cohort$new(path = 'outputs.csv')")
+        } else {
+          stop("Input must be either a path (character) or data.table")
         }
-        dt = data.table(read.csv(path_to_outputs_csv, colClasses = c("patient_id" = "character", "pair" = "character", "patient" = "character")))
-        self$inputs <- private$construct_from_datatable(dt)[]
-      } else if (is_tabular) {
-        self$inputs <- private$construct_from_datatable(x)[]
-      } else if (is_dir) {
-        self$inputs <- private$construct_from_path(x)[]
-        self$nextflow_results_path <- x
-        warning("Cohort initialized from path: ", x, "\n",
-          "This is deprecated! You should use the gosh-cli to generate an outputs.csv file and then read it in using Cohort$new(path = 'outputs.csv')")
-      } else {
-        stop("Input must be either a path (character) or data.table")
-      }
 
-      
-      is_null_params = is.null(params_json_path)
-      if (is_output_csv_provided && is_null_params) {
-        fls = list.files(dirname(path_to_outputs_csv), full.names = TRUE)
-        params_json_path_query = grep("params.*\\.json", fls, value = TRUE)
-        nr = NROW(params_json_path_query)
-        if (nr > 0) {
-          params_json_path = params_json_path_query[1]
-          if (nr > 1) message("More than one params JSON found in outputs.csv directory - using the first one: ", params_json_path)
-        } else if (nr < 1) {
-          message("No params.json path found") ## params_json_path stays NULL
-        }
-      }
-
-      params_list = list()
-      
-      is_null_params = is.null(params_json_path)
-      is_params_present = (
-        !is_null_params 
-        && is.character(params_json_path) 
-        && NROW(params_json_path) == 1 
-        && all(!is.na(params_json_path)) 
-        && all(file.exists(params_json_path))
-      )
-
-      if (is_params_present) {
-        params_list = jsonlite::fromJSON(params_json_path)
-      }
-
-      default_cohort_types <- c("paired", "heme", "tumor_only")
-      if (!cohort_type %in% default_cohort_types) {
-        stop("cohort_type must be one of: ", paste(default_cohort_types, collapse = ", "))
-      }
-
-      ## Default cohort_type is "paired"
-      if (identical(params_list$is_heme, TRUE)) {
-        if (!identical(cohort_type, "heme")) {
-          message("Run type determined to be heme from params.json - overriding cohort_type to 'heme'")
-        }
-        cohort_type = "heme"
-      } else if (identical(params_list$tumor_only, TRUE)) {
-        if (!identical(cohort_type, "tumor_only")) {
-          message("Run type determined to be tumor_only from params.json - overriding cohort_type to 'tumor_only'")
-        }
-        cohort_type = "tumor_only"
-      }
-
-      self$type <- cohort_type
-
-
-      
-
-    ## Service account json
-
-    # merge_tumor_type = function(self) {
-    #   gs4_auth_path_opt = getOption("gs4_auth_path")
-    #   is_present_opt = !is.null(gs4_auth_path_opt)
-    #   gs4_auth_path_env = Sys.getenv("GS4_AUTH_PATH")
-    #   is_present_env = !(identical(gs4_auth_path_env, "") || identical(gs4_auth_path_env, character(0)))
-    #   gs4_auth_path_arg = gs4_auth_path
-    #   is_present_arg = (
-    #     is.character(gs4_auth_path_arg) 
-    #     && NROW(gs4_auth_path_arg) == 1 
-    #     && all(!is.na(gs4_auth_path_arg)) 
-    #     && file.exists(gs4_auth_path_arg)
-    #   )
-    #   tumor_type_db = NULL
-    #   proceed_with_tumor_type_mapping = is_present_opt || is_present_env || is_present_arg
-    #   if (proceed_with_tumor_type_mapping) {
-    #     watchmaker_sequencing_tumor_types = "https://docs.google.com/spreadsheets/d/18BKzuuMS50X6jTAqJv1nAJPOWlp0Jn_jHQUx3wN4M4k/edit?usp=sharing"
-    #     if (is_present_env) gs4_auth_path = gs4_auth_path_env
-    #     if (is_present_opt) gs4_auth_path = gs4_auth_path_opt
-    #     if (is_present_arg) gs4_auth_path = gs4_auth_path_arg
-    #     googlesheets4::gs4_auth(path = gs4_auth_path)
-    #     tumor_type_db = tryCatch(
-    #       {
-    #         googlesheets4::read_sheet(watchmaker_sequencing_tumor_types, "Samples")
-    #       },
-    #       error = function(e) {
-    #         message("Could not authenticate with googlesheets4 using provided service account - will not match tumor type to internal DB")
-    #         # message("Error: ", e$message)
-    #         return(NULL)
-    #       }
-    #     )
-    #     tumor_type_db = data.table::as.data.table(tumor_type_db)
-    #   } else {
         
-    #     message("No googlesheets4 authentication method provided - will not match tumor type to internal DB")
-    #     message("googlesheets4 authentication can be provided as flag to Skilift$Cohort$new(..., gs4_auth_path='/path/to/google-cloud-service-account.json') or via `options(gs4_auth_path = '/path/to/google-cloud-service-account.json')` or read in as an environment variable `GS4_AUTH_PATH=/path/to/google-cloud-service-account.json')`")
-    #   }
-    #   # googlesheets4::gs4_auth(path = "~/.secrets/solar-semiotics-469520-b8-ae032496e3f0.json")
+        is_null_params = is.null(params_json_path)
+        if (is_output_csv_provided && is_null_params) {
+          fls = list.files(dirname(path_to_outputs_csv), full.names = TRUE)
+          params_json_path_query = grep("params.*\\.json", fls, value = TRUE)
+          nr = NROW(params_json_path_query)
+          if (nr > 0) {
+            params_json_path = params_json_path_query[1]
+            if (nr > 1) message("More than one params JSON found in outputs.csv directory - using the first one: ", params_json_path)
+          } else if (nr < 1) {
+            message("No params.json path found") ## params_json_path stays NULL
+          }
+        }
 
-    #     if (!is.null(tumor_type_db)) {
-    #       tumor_type_db$tumor_sample = tumor_type_db$Tumor_WG_Number
-    #       otumor_sample = gsub(
-    #         "___.*", "", 
-    #         self$inputs$tumor_sample
-    #       )
-    #       otumor_sample = gsub("(WG-[0-9]+-[0-9]+)[[:punct:]]+.*", "\\1", otumor_sample, perl = TRUE)
-    #       ## Taking care of the frickin wetlab suffixes
-    #       otumor_sample = (
-    #         gsub("-[0-9]+m", "", otumor_sample)
-    #         %>% gsub("-PCR_Free", "", .)
-    #         %>% gsub("-NEB", "", .)
-    #         %>% gsub("_HB", "", .)
-    #         %>% gsub("-HB", "", .)
-    #         %>% gsub("_sonicated", "", .)
-    #         %>% gsub("(F|S)$", "", .)
-    #         %>% gsub("(_plus.*MBN.*)$", "", .)
-    #         %>% gsub("(-(mid|after))$", "", .)    
-    #       )
-    #       self$inputs$otumor_sample = otumor_sample
-    #       self$inputs = Skilift::merge.repl(
-    #         self$inputs,
-    #         # tumor_type_db[, .(tumor_sample = Tumor_WG_Number, tumor_type = Tumor_Type, tumor_group = Tumor_Group)]
-    #         tumor_type_db
-    #         ,
-    #         prefer_y = TRUE,
-    #         by.x = "otumor_sample",
-    #         by.y = "tumor_sample",
-    #         allow.cartesian = TRUE
-    #       )
-    #       self$inputs$tumor_type = self$inputs$Tumor_Type
-    #   }
-    #   return(self)
-    # }
+        params_list = list()
+        
+        is_null_params = is.null(params_json_path)
+        is_params_present = (
+          !is_null_params 
+          && is.character(params_json_path) 
+          && NROW(params_json_path) == 1 
+          && all(!is.na(params_json_path)) 
+          && all(file.exists(params_json_path))
+        )
 
-    if (merge_tumor_type_db) {
-      self = merge_tumor_type(cohort = self, gs4_auth_path = gs4_auth_path)
-    }
-    
+        if (is_params_present) {
+          params_list = jsonlite::fromJSON(params_json_path)
+        }
 
-      # if (is.character(x) && length(x) == 1) {
-      #   if (grepl("\\.csv$", x)) {
-      #     self$inputs <- private$construct_from_datatable(data.table(read.csv(x, colClasses = c("patient_id" = "character", "pair" = "character", "patient" = "character"))))[]
+        default_cohort_types <- c("paired", "heme", "tumor_only")
+        if (!cohort_type %in% default_cohort_types) {
+          stop("cohort_type must be one of: ", paste(default_cohort_types, collapse = ", "))
+        }
+
+        ## Default cohort_type is "paired"
+        if (identical(params_list$is_heme, TRUE)) {
+          if (!identical(cohort_type, "heme")) {
+            message("Run type determined to be heme from params.json - overriding cohort_type to 'heme'")
+          }
+          cohort_type = "heme"
+        } else if (identical(params_list$tumor_only, TRUE)) {
+          if (!identical(cohort_type, "tumor_only")) {
+            message("Run type determined to be tumor_only from params.json - overriding cohort_type to 'tumor_only'")
+          }
+          cohort_type = "tumor_only"
+        }
+
+        self$type <- cohort_type
+
+
+        
+
+      ## Service account json
+
+      # merge_tumor_type = function(self) {
+      #   gs4_auth_path_opt = getOption("gs4_auth_path")
+      #   is_present_opt = !is.null(gs4_auth_path_opt)
+      #   gs4_auth_path_env = Sys.getenv("GS4_AUTH_PATH")
+      #   is_present_env = !(identical(gs4_auth_path_env, "") || identical(gs4_auth_path_env, character(0)))
+      #   gs4_auth_path_arg = gs4_auth_path
+      #   is_present_arg = (
+      #     is.character(gs4_auth_path_arg) 
+      #     && NROW(gs4_auth_path_arg) == 1 
+      #     && all(!is.na(gs4_auth_path_arg)) 
+      #     && file.exists(gs4_auth_path_arg)
+      #   )
+      #   tumor_type_db = NULL
+      #   proceed_with_tumor_type_mapping = is_present_opt || is_present_env || is_present_arg
+      #   if (proceed_with_tumor_type_mapping) {
+      #     watchmaker_sequencing_tumor_types = "https://docs.google.com/spreadsheets/d/18BKzuuMS50X6jTAqJv1nAJPOWlp0Jn_jHQUx3wN4M4k/edit?usp=sharing"
+      #     if (is_present_env) gs4_auth_path = gs4_auth_path_env
+      #     if (is_present_opt) gs4_auth_path = gs4_auth_path_opt
+      #     if (is_present_arg) gs4_auth_path = gs4_auth_path_arg
+      #     googlesheets4::gs4_auth(path = gs4_auth_path)
+      #     tumor_type_db = tryCatch(
+      #       {
+      #         googlesheets4::read_sheet(watchmaker_sequencing_tumor_types, "Samples")
+      #       },
+      #       error = function(e) {
+      #         message("Could not authenticate with googlesheets4 using provided service account - will not match tumor type to internal DB")
+      #         # message("Error: ", e$message)
+      #         return(NULL)
+      #       }
+      #     )
+      #     tumor_type_db = data.table::as.data.table(tumor_type_db)
       #   } else {
-      #     self$inputs <- private$construct_from_path(x)[]
-      #     self$nextflow_results_path <- x
-      #     warning("Cohort initialized from path: ", x, "\n",
-      #       "This is deprecated! You should use the gosh-cli to generate an outputs.csv file and then read it in using Cohort$new(path = 'outputs.csv')")
+          
+      #     message("No googlesheets4 authentication method provided - will not match tumor type to internal DB")
+      #     message("googlesheets4 authentication can be provided as flag to Skilift$Cohort$new(..., gs4_auth_path='/path/to/google-cloud-service-account.json') or via `options(gs4_auth_path = '/path/to/google-cloud-service-account.json')` or read in as an environment variable `GS4_AUTH_PATH=/path/to/google-cloud-service-account.json')`")
       #   }
-      # } else if (is.data.table(x)) {
-      #   self$inputs <- private$construct_from_datatable(x)[]
-      # } else {
-      #   stop("Input must be either a path (character) or data.table")
+      #   # googlesheets4::gs4_auth(path = "~/.secrets/solar-semiotics-469520-b8-ae032496e3f0.json")
+
+      #     if (!is.null(tumor_type_db)) {
+      #       tumor_type_db$tumor_sample = tumor_type_db$Tumor_WG_Number
+      #       otumor_sample = gsub(
+      #         "___.*", "", 
+      #         self$inputs$tumor_sample
+      #       )
+      #       otumor_sample = gsub("(WG-[0-9]+-[0-9]+)[[:punct:]]+.*", "\\1", otumor_sample, perl = TRUE)
+      #       ## Taking care of the frickin wetlab suffixes
+      #       otumor_sample = (
+      #         gsub("-[0-9]+m", "", otumor_sample)
+      #         %>% gsub("-PCR_Free", "", .)
+      #         %>% gsub("-NEB", "", .)
+      #         %>% gsub("_HB", "", .)
+      #         %>% gsub("-HB", "", .)
+      #         %>% gsub("_sonicated", "", .)
+      #         %>% gsub("(F|S)$", "", .)
+      #         %>% gsub("(_plus.*MBN.*)$", "", .)
+      #         %>% gsub("(-(mid|after))$", "", .)    
+      #       )
+      #       self$inputs$otumor_sample = otumor_sample
+      #       self$inputs = Skilift::merge.repl(
+      #         self$inputs,
+      #         # tumor_type_db[, .(tumor_sample = Tumor_WG_Number, tumor_type = Tumor_Type, tumor_group = Tumor_Group)]
+      #         tumor_type_db
+      #         ,
+      #         prefer_y = TRUE,
+      #         by.x = "otumor_sample",
+      #         by.y = "tumor_sample",
+      #         allow.cartesian = TRUE
+      #       )
+      #       self$inputs$tumor_type = self$inputs$Tumor_Type
+      #   }
+      #   return(self)
       # }
 
-      inp = self$inputs
-      dm = dim(inp)
-      has_dimensions = !is.null(dm) && !identical(c(0L, 0L), dim(data.table()))
-      jx = integer()
-      if (has_dimensions) jx = seq_len(NCOL(inp))
-      for (j in jx) {
-        v = inp[[j]]
-        is_character = is.character(v)
-        if (!is_character) next
-        trimmedv = trimws(v)
-        self$inputs[[j]] = ifelse(Skilift::is_loosely_na(trimmedv) | !nzchar(trimmedv), NA_character_, v)
+      if (merge_tumor_type_db) {
+        self = merge_tumor_type(cohort = self, gs4_auth_path = gs4_auth_path)
       }
+      
+
+        # if (is.character(x) && length(x) == 1) {
+        #   if (grepl("\\.csv$", x)) {
+        #     self$inputs <- private$construct_from_datatable(data.table(read.csv(x, colClasses = c("patient_id" = "character", "pair" = "character", "patient" = "character"))))[]
+        #   } else {
+        #     self$inputs <- private$construct_from_path(x)[]
+        #     self$nextflow_results_path <- x
+        #     warning("Cohort initialized from path: ", x, "\n",
+        #       "This is deprecated! You should use the gosh-cli to generate an outputs.csv file and then read it in using Cohort$new(path = 'outputs.csv')")
+        #   }
+        # } else if (is.data.table(x)) {
+        #   self$inputs <- private$construct_from_datatable(x)[]
+        # } else {
+        #   stop("Input must be either a path (character) or data.table")
+        # }
+
+        inp = self$inputs
+        dm = dim(inp)
+        has_dimensions = !is.null(dm) && !identical(c(0L, 0L), dim(data.table()))
+        jx = integer()
+        if (has_dimensions) jx = seq_len(NCOL(inp))
+        for (j in jx) {
+          v = inp[[j]]
+          is_character = is.character(v)
+          if (!is_character) next
+          trimmedv = trimws(v)
+          self$inputs[[j]] = ifelse(Skilift::is_loosely_na(trimmedv) | !nzchar(trimmedv), NA_character_, v)
+        }
+          return(self)
+      }
+      if (identical(suppressWarnings, TRUE)) {
+        suppressWarnings({ self = main() })
+      } else {
+        self = main()
+      }
+      return(self)
     },
 
     #' Print method for cohort object

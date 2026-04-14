@@ -165,7 +165,23 @@ meltski = function(
     keep_remaining_cols = FALSE,
     keep_original_cols = FALSE,
     return_as_data_table = FALSE
-) {
+    ) {
+  is_drop_na_specified = ( is.character(drop) && any(drop %in% c("na.omit.all", "na.omit.some")) )
+  do_drop = (
+    ( is.logical(drop) && identical(drop, TRUE) )
+    || ( is.character(drop) && identical(tolower(drop), "true") )
+    || ( is.character(drop) && drop %in% c("na.omit.all", "na.omit.some") )
+  )
+  drop_type = "na.omit.all"
+  if (is_drop_na_specified && identical(drop, "na.omit.all")) {
+    drop_type = "na.omit.all"
+  } else if (is_drop_na_specified && identical(drop, "na.omit.some")) {
+    drop_type = "na.omit.some"
+  } else if (do_drop && !is_drop_na_specified) {
+    message("No drop type specified, setting drop to 'na.omit.all', removing all rows where id.var fields have any NA.")
+    message("To keep rows with at least one none NA entry, use 'na.omit.some'")
+    drop_type = "na.omit.all"
+  }
   keep_first_variable_col = identical(keep_first_variable_col, TRUE)
   keep_remaining_cols = identical(keep_remaining_cols, TRUE)
   keep_original_cols = identical(keep_original_cols, TRUE)
@@ -222,11 +238,18 @@ meltski = function(
     if (is_measure_regex) var = grep(var, all_names, value = TRUE)
     if (is.list(var)) var = unlist(var)
     tbl_to_rbind = base::subset(tbl, select = names(tbl) %in% c(id.vars, var))
-    if (drop) {
-      is_none_na = stats::complete.cases(
-        base::subset(tbl_to_rbind, select = names(tbl_to_rbind) %in% var)
-      )
-      tbl_to_rbind = base::subset(tbl_to_rbind, is_none_na)
+    if (do_drop) {
+      na_mat = is.na(base::subset(tbl_to_rbind, select = names(tbl_to_rbind) %in% var))
+      if (identical(drop_type, "na.omit.some")) {
+        is_row_passing_na_test = rowSums(na_mat) < NCOL(tbl_to_rbind)
+      } else {
+        is_row_passing_na_test = !rowSums(na_mat) > 0
+      }
+      
+      ## is_none_na = stats::complete.cases(
+      ##   base::subset(tbl_to_rbind, select = names(tbl_to_rbind) %in% var)
+      ## )
+      tbl_to_rbind = base::subset(tbl_to_rbind, is_row_passing_na_test)
     }
     nm = names(tbl_to_rbind)
     for (i in seq_along(var)) {
@@ -241,7 +264,8 @@ meltski = function(
     names(tbl_to_rbind) = nm
     for (i in seq_along(var)) {
       var.col = paste(variable.name, "_", i, sep = "")
-      tbl_to_rbind[[var.col]] = var[i]
+      tbl_to_rbind[[var.col]] = rep_len(var[i], NROW(tbl_to_rbind))
+      ## tbl_to_rbind[[var.col]] = var[i]
       collected_var_names = c(collected_var_names, var.col)
     }
     ## if (inherits(tbl_to_rbind[["value_1"]], "character")) browser()

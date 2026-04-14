@@ -1121,18 +1121,63 @@ collect_oncokb_fusions <- function(oncokb_fusions, pge, cytoband, verbose = TRUE
     is_na_B = is.na(ixB)
     is_either_na = is_na_A | is_na_B
     na.index <- which(is_either_na)
-    # ixA <- ixA[!is.na(ixA)]
-    # ixB <- ixB[!is.na(ixB)]
-    grA <- pge[ixA[!is_na_A]]
-    grB <- pge[ixB[!is_na_B]]
-    coordB = coordA = character(NROW(non_silent_fusions))
-    coordA[!is_na_A] <- gUtils::gr.string(grA)
-    coordB[!is_na_B] <- gUtils::gr.string(grB)
+    ix_bp5p = which(nm %in% c("bp5p")) 
+    ix_bp3p = which(nm %in% c("bp3p"))
+    is_bp5p_present = FALSE
+    is_bp3p_present = FALSE
+    if (NROW(ix_bp5p > 1)) {
+        ix_bp5p = ix_bp5p[1]
+        is_bp5p_present = TRUE
+    }
+    if (NROW(ix_bp3p > 1)) {
+        ix_bp3p = ix_bp3p[1]
+        is_bp3p_present = TRUE
+    }
+    use_genes_for_coordinates = ! (is_bp5p_present && is_bp3p_present )
+    grA_gene <- pge[ixA[!is_na_A]]
+    grB_gene <- pge[ixB[!is_na_B]]
+    coordB_gene = coordA_gene = character(NROW(non_silent_fusions))
+    coordA_gene[!is_na_A] <- gUtils::gr.string(grA_gene)
+    coordB_gene[!is_na_B] <- gUtils::gr.string(grB_gene)
+    if (use_genes_for_coordinates) {
+      # ixA <- ixA[!is.na(ixA)]
+      # ixB <- ixB[!is.na(ixB)]
+      ## grA <- pge[ixA[!is_na_A]]
+      ## grB <- pge[ixB[!is_na_B]]
+      coordB = coordA = character(NROW(non_silent_fusions))
+      coordA[!is_na_A] <- gUtils::gr.string(grA)
+      coordB[!is_na_B] <- gUtils::gr.string(grB)
+    } else {
+      na.index = integer(0)      
+      bp5p_grl = gUtils::parse.grl(
+        non_silent_fusions[[ix_bp5p]]
+      )
+      ## bp5p = gUtils::grl.unlist(bp5p_grl)
+      bp3p_grl = gUtils::parse.grl(
+        non_silent_fusions[[ix_bp3p]]
+      )
+      ## bp3p = gUtils::grl.unlist(bp3p_grl)
+      ## grA = bp5p
+      ## grB = bp3p
+      
+      coordA = gUtils::grl.string(bp5p_grl)
+      coordB = gUtils::grl.string(bp3p_grl)
+    }
 
     # Leaving cytoband query code in for now, because we will want to re-incorporate
     # at a later date
-    grovA <- gUtils::gr.findoverlaps(grA, cytoband, scol = "chromband")
-    grovB <- gUtils::gr.findoverlaps(grB, cytoband, scol = "chromband")
+    QCOL = NULL
+    ## do_deal_with_grl = !is.null(S4Vectors::mcols(grA)$grl.ix) && !is.null(S4Vectors::mcols(grB)$grl.ix)
+    ## if (do_deal_with_grl) {
+    ##     QCOL = "grl.ix"
+    ## }
+    grovA <- gUtils::gr.findoverlaps(grA_gene, cytoband, qcol = QCOL, scol = "chromband")
+    grovB <- gUtils::gr.findoverlaps(grB_gene, cytoband, qcol = QCOL, scol = "chromband")
+
+    ## if (do_deal_with_grl) {
+    ##     grovA$query.id = grovA$grl.ix
+    ##     grovB$query.id = grovB$grl.ix        
+    ## }
 
     
     if (length(grovA) > 0) {
@@ -1162,13 +1207,18 @@ collect_oncokb_fusions <- function(oncokb_fusions, pge, cytoband, verbose = TRUE
     non_silent_fusions$fusion_genes <- paste0(
       genes_matrix[, 1], "::", genes_matrix[, 2]
     )
-    non_silent_fusions$fusion_gene_coords <- ifelse(!1:nrow(non_silent_fusions) %in% na.index,
+
+    fcoords = ifelse(!1:nrow(non_silent_fusions) %in% na.index,
       paste(coordA, coordB, sep = ","),
       NA
     )
+    fcoords = gsub('^,{1,}|,{1,}$', '', gsub(",{2,}", ",", trimws(fcoords), perl = TRUE), perl = TRUE)
+    
+    non_silent_fusions$fusion_gene_coords <- fcoords
+    
 
     variant.g.fus = ifelse(!1:nrow(non_silent_fusions) %in% na.index,
-      as.character(glue::glue('{coordA} ({non_silent_fusions$cytoA}), {coordB} ({non_silent_fusions$cytoB})')),
+      as.character(glue::glue('{coordA_gene} ({non_silent_fusions$cytoA}), {coordB_gene} ({non_silent_fusions$cytoB})')),
       NA_character_
     )
 
@@ -1224,6 +1274,213 @@ collect_oncokb_fusions <- function(oncokb_fusions, pge, cytoband, verbose = TRUE
       fusion_gene_coords,
       track = "variants",
       source = "oncokb_fusions"
+    )]
+  }
+
+  return(out)
+}
+
+#' Collect OncoKB intragenic
+#' 
+#' Collect oncokb intragenic fusions, are parsed separately from the main oncokb fusions file, and include intragenic deletions and duplications.
+#'
+#' @param oncokb_intragenic_deletions Path to the oncokb intragenic deletions file.
+#' @param oncokb_intragenic_duplications Path to the oncokb intragenic duplications file.
+#' @param verbose Logical flag to indicate if messages should be printed.
+#' @return A data.table containing processed OncoKB Fusion information.
+#' @author Kevin Hadi
+collect_oncokb_intragenic <- function(
+  oncokb_intragenic_deletions = NULL, 
+  oncokb_intragenic_duplications = NULL,
+  pge, 
+  cytoband, 
+  verbose = TRUE
+) {
+
+  out <- data.table(vartype = NA, source = "oncokb_intragenic")
+  is_intragenic_deletion_present = FALSE
+  is_intragenic_duplication_present = FALSE
+
+  if (all(file.exists(oncokb_intragenic_deletions))) {
+      is_intragenic_deletion_present = TRUE
+      oncokb_intragenic_deletions <- data.table::fread(oncokb_intragenic_deletions)
+  }
+      
+
+  if (all(file.exists(oncokb_intragenic_duplications))) {
+      is_intragenic_duplication_present = TRUE
+      oncokb_intragenic_duplications <- data.table::fread(oncokb_intragenic_duplications)
+  }
+
+  is_neither_present = !is_intragenic_deletion_present && !is_intragenic_duplication_present
+
+
+  if (is_neither_present) {
+      if (verbose) message("OncoKB intragenic events are missing or do not exist.")
+      return(out)
+  }
+
+
+  oncokb_intragenic = data.table:::rbind.data.table(
+    oncokb_intragenic_deletions,
+    oncokb_intragenic_duplications,
+    fill = TRUE
+  )
+
+  if (NROW(oncokb_intragenic) > 0) {
+    oncokb_intragenic <- parse_oncokb_tier(
+      oncokb_intragenic,
+      tx_cols = c("LEVEL_1", "LEVEL_2"),
+      rx_cols = c("LEVEL_R1"),
+      dx_cols = c("LEVEL_Dx1"),
+      px_cols = c("LEVEL_Px1")
+    )
+
+    non_silent_intragenic <- oncokb_intragenic[silent == FALSE, ] # already de-duped
+    vartype_values = vartype_values = ( function(x) {
+      if (is.null(x) || NROW(x) == 0) return("fusion")
+      out = data.table::fcase(
+        is.na(x) | nchar(x) == 0, "fusion",
+        x == TRUE, "inframe_fusion",
+        x == FALSE, "outframe_fusion"
+      )
+      return(out)
+    } )(non_silent_intragenic$in.frame)
+    non_silent_intragenic[["vartype"]] = rep_len(vartype_values, NROW(non_silent_intragenic))
+
+    if (!NROW(non_silent_intragenic) > 0) {
+      return(out)
+    }
+    nm = tolower(names(non_silent_intragenic))
+    ixcol = which(nm %in% "hugo_symbol")
+    ix_bp5p = which(nm %in% c("bp5p")) 
+    ix_bp3p = which(nm %in% c("bp3p"))
+    nr_ixcol = NROW(ixcol)
+    if (nr_ixcol > 1) ixcol = ixcol[1]
+    is_bp5p_present = FALSE
+    is_bp3p_present = FALSE
+    if (NROW(ix_bp5p > 1)) {
+        ix_bp5p = ix_bp5p[1]
+        is_bp5p_present = TRUE
+    }
+    if (NROW(ix_bp3p > 1)) {
+        ix_bp3p = ix_bp3p[1]
+        is_bp3p_present = TRUE
+    }
+    genes = non_silent_intragenic[[ixcol]]
+    genes = gsub("[[:space:]]+intragenic", "", genes)    
+    ixA <- match(genes, pge$gene_name)
+    is_na_A = is.na(ixA)
+    na.index <- which(is_na_A)
+    grA_gene <- pge[ixA[!is_na_A]]
+    coordA_gene = character(NROW(non_silent_intragenic))
+    coordA_gene[!is_na_A] <- gUtils::gr.string(grA_gene)
+    use_genes_for_coordinates = ! (is_bp5p_present && is_bp3p_present )
+    if (use_genes_for_coordinates) {
+        coordA = coordA_gene
+        coordB = coordA
+    } else {
+      bp5p = gUtils::grl.string(
+          gUtils::parse.grl(
+            non_silent_intragenic[[ix_bp5p]]
+          )
+      )
+      bp3p = gUtils::grl.string(
+          gUtils::parse.grl(
+            non_silent_intragenic[[ix_bp3p]]
+          )
+      )
+      ## bp5p = gr.string(unlist(
+      ##   range(
+      ##     gUtils::parse.grl(
+      ##       non_silent_intragenic[[ix_bp5p]]
+      ##     )
+      ##   )
+      ## ))
+      ## bp3p = gUtils::gr.string(unlist(
+      ##   range(
+      ##     gUtils::parse.grl(
+      ##       non_silent_intragenic[[ix_bp3p]]
+      ##     )
+      ##   )
+      ## ))
+
+      coordA = bp5p
+      coordB = bp3p
+    }
+
+    ## FIXME: Just ignoring for now
+    non_silent_intragenic$cytoA = ""
+    non_silent_intragenic$cytoB = ""
+
+    non_silent_intragenic$fusion_genes <- non_silent_intragenic[["Hugo_Symbol"]]
+    fcoords = paste(coordA, coordB, sep = ",")
+    fcoords = gsub('^,{1,}|,{1,}$', '', gsub(",{2,}", ",", trimws(fcoords), perl = TRUE), perl = TRUE)
+    non_silent_intragenic$fusion_gene_coords <- fcoords
+
+    ## variant.g.fus = ifelse(!1:nrow(non_silent_intragenic) %in% na.index,
+    ##   as.character(glue::glue('{coordA} ({non_silent_intragenic$cytoA}), {coordB} ({non_silent_intragenic$cytoB})')),
+    ##   NA_character_
+    ## )
+    variant.g.fus = as.character(glue::glue('{coordA_gene}'))
+
+    non_silent_intragenic$variant.g = variant.g.fus
+
+
+    get_queries = c("exon_event_start", "exon_event_end", "amino_event_start", "amino_event_end")
+    query_variables = base::mget(
+      get_queries,
+      as.environment(as.list(non_silent_intragenic)),
+      ifnotfound = rep_len(
+        list(rep_len(NA_character_, NROW(non_silent_intragenic))),
+        NROW(get_queries)
+      )
+    )
+    exonA_label = glue::glue('Exon {query_variables$exon_event_start}')
+    aminoA_label = ifelse(is.na(query_variables$amino_event_start), "", glue::glue(' (p.{query_variables$amino_event_start})'))
+    exonB_label = glue::glue('Exon {query_variables$exon_event_end}')
+    aminoB_label = ifelse(is.na(query_variables$amino_event_end), "", glue::glue(' (p.{query_variables$amino_event_end})'))
+
+    variant.p.parsed = as.character(
+      glue::glue(
+        '{data.table::fcase(
+          non_silent_intragenic$exon_event_type == "skip", "Del",
+          non_silent_intragenic$exon_event_type == "dup", "PTD"
+        )}',
+        " ",
+        '{exonA_label}',
+        '{aminoA_label}', # Note space is encoded by aminoA_label
+        ' ',
+        '{exonB_label}',
+        '{aminoB_label}' # Note space is encoded by aminoB_label
+      )
+    )
+    variant.p.parsed = trimws(variant.p.parsed)
+    variant.p.parsed = gsub("[[:space:]]{2,}", "", variant.p.parsed, perl = TRUE)
+
+    non_silent_intragenic$variant.p = variant.p.parsed
+    out <- non_silent_intragenic[, .(
+      gene = Hugo_Symbol,
+      gene_summary = GENE_SUMMARY,
+      role = Role,
+      variant.g,
+      variant.p,
+      value = min_cn,
+      vartype,
+      type = "fusion",
+      tier = tier,
+      tier_description = tier_factor,
+      variant_summary = VARIANT_SUMMARY,
+      therapeutics = tx_string,
+      resistances = rx_string,
+      diagnoses = dx_string,
+      prognoses = px_string,
+      effect = MUTATION_EFFECT,
+      effect_description = MUTATION_EFFECT_DESCRIPTION,
+      fusion_genes,
+      fusion_gene_coords,
+      track = "variants",
+      source = "oncokb_intragenic"
     )]
   }
 
@@ -1813,7 +2070,6 @@ parse_echtvar_oncotable = function(ot) {
   ] = c("clinvar", "am", "sift", "pphen")
   names(tlst_mg) = nms
 
-  # browser()
   ## tlst_final = tlst_mg[,
   ## {
   ##   ENV = environment()
@@ -1901,7 +2157,9 @@ oncotable <- function(
     multiplicity = NULL,
     oncokb_snv = NULL,
     oncokb_cna = NULL,
-    oncokb_fusions = NULL,                
+    oncokb_fusions = NULL,
+    oncokb_intragenic_deletions = NULL,
+    oncokb_intragenic_duplications = NULL,
     gencode,
     cytoband,
     verbose = TRUE,
@@ -1943,6 +2201,37 @@ oncotable <- function(
     out <- rbind(
       out,
       collect_oncokb_fusions(oncokb_fusions, pge, cytoband, verbose),
+      fill = TRUE,
+      use.names = TRUE
+    )
+  } else {
+    out <- rbind(
+      out,
+      collect_gene_fusions(fusions, pge, verbose),
+      fill = TRUE,
+      use.names = TRUE
+    )
+  }
+
+  if ( (
+      !any(is.na(oncokb_intragenic_deletions))
+    && !is.null(oncokb_intragenic_deletions)
+    && all(file.exists(oncokb_intragenic_deletions))
+  ) || (
+    !any(is.na(oncokb_intragenic_duplications))
+    && !is.null(oncokb_intragenic_duplications)
+    && all(file.exists(oncokb_intragenic_duplications))    
+  ) ) {
+      ## FIXME: the logic to grab coordinates doesn't make sense for fusions. Should take into account the actual junction + gene name..
+    out <- rbind(
+      out,
+      collect_oncokb_intragenic(
+        oncokb_intragenic_deletions = oncokb_intragenic_deletions,
+        oncokb_intragenic_duplications = oncokb_intragenic_duplications,
+        pge,
+        cytoband,
+        verbose
+      ),
       fill = TRUE,
       use.names = TRUE
     )
@@ -2132,7 +2421,6 @@ create_oncotable <- function(
   if (!"oncotable" %in% names(updated_cohort$inputs)) {
     updated_cohort$inputs[, oncotable := NA_character_]
   }
-  # browser()
 
   jabba_column = Skilift::DEFAULT_JABBA(object = cohort)
 
@@ -2188,6 +2476,8 @@ create_oncotable <- function(
         oncokb_snv = row[["oncokb_snv"]],
         oncokb_cna = row[["oncokb_cna"]],
         oncokb_fusions = row[["oncokb_fusions"]],
+        oncokb_intragenic_deletions = row[["oncokb_intragenic_deletions"]],
+        oncokb_intragenic_duplications = row[["oncokb_intragenic_duplications"]],
         gencode = gencode,
         cytoband = cytoband,
         verbose = TRUE,
@@ -2447,7 +2737,11 @@ create_filtered_events <- function(
     }
     res.fus = res[type == "fusion",] ## need to deal each class explicitly
     if (NROW(res.fus) > 0) {
+      res.fus$fusion_gene_coords = gsub("(?<=,)[+-]|[+-](?=,)|[+-]$", "", res.fus$fusion_gene_coords, perl = TRUE)
       res.fus$gene = res.fus$fusion_genes
+      is_intragenic = ! grepl("::", res.fus$fusion_genes)
+      is_intragenic_del = is_intragenic & grepl("Del", res.fus$Variant)
+      is_intragenic_ptd = is_intragenic & grepl("PTD", res.fus$Variant)
       is_noframe = res.fus$vartype == "fusion"
       is_inframe = res.fus$vartype == "inframe_fusion"
       is_outframe = res.fus$vartype == "outframe_fusion"
@@ -2461,11 +2755,19 @@ create_filtered_events <- function(
         ifnotfound = rep_len("", NROW(res.fus))
       )
       fus_frame_label = data.table::fcase(
-        is_inframe, "In-Frame Fusion",
-        is_outframe, "Out-of-Frame Fusion",
-        is_noframe, "Fusion",
+        is_inframe, "In-Frame",
+        is_outframe, "Out-of-Frame",
+        is_noframe, "",
         default = NA_character_
       )
+      fus_intragenic_label = data.table::fcase(
+        is_intragenic_del, "",
+        is_intragenic_ptd, "",
+        !is_intragenic, "Fusion",
+        default = NA_character_
+      )
+      fus_frame_label = trimws(paste(fus_frame_label, fus_intragenic_label))
+        
       # fus_frame_label
       if (any(is.na(fus_frame_label))) stop("A fusion was not labeled as inframe, outframe, or noframe")
       variant_label = paste(
@@ -2475,6 +2777,44 @@ create_filtered_events <- function(
       variant_label = trimws(variant_label)
       variant_label = gsub("[[:space:]]{2,}", "", variant_label)
       res.fus$Variant = variant_label
+      ## Fudging around the coordinates a bit because of the frontend keying behavior
+      ## gOS frontend expects that the genome location is unique..
+      ## This may be violated by fusions that use the same breakpoint
+      ## But may annotate a different event due to transcript ambiguity.
+      padded_coords = GenomicRanges::reduce(gUtils::parse.grl(res.fus$fusion_gene_coords) + 250, ignore.strand = TRUE) %>% gUtils::grl.string()
+      coord_tbl = data.table::data.table(fusion_gene_coords = padded_coords)[, .(listid = .I, .GRP, iix = seq_len(.N)), by = fusion_gene_coords][order(rank(listid))]
+      
+      ## coord_tbl = data.table::data.table(fusion_gene_coords = res.fus$fusion_gene_coords)[, .(listid = .I, .GRP, iix = seq_len(.N)), by = fusion_gene_coords][order(rank(listid))]
+      coord_tbl[, is_duplicated := iix > 1]
+      ## dlfus = Skilift:::dunlist(strsplit(res.fus$fusion_gene_coords, ","))
+      dlfus = Skilift:::dunlist(unname(strsplit(padded_coords, ",")))
+      dlfus = data.table::merge.data.table(dlfus, coord_tbl, by = "listid")
+      matfus = stringr::str_split_fixed(dlfus$V1, pattern = ":|-", 3)
+      dlfus$seqnames = matfus[,1]
+      dlfus$start = as.integer(matfus[,2])
+      dlfus$end = as.integer(matfus[,3])
+      ## dlfus[, start_padded := start - 250L][]
+      ## dlfus[, end_padded := end + 250L][]
+      set.seed(10)
+      ## dlfus[is_duplicated == TRUE, start_padded := round(jitter(start_padded, amount = 5)) - round(runif(1) * 5)][]
+      ## dlfus[is_duplicated == TRUE, end_padded := round(jitter(end_padded, amount = 5)) + round(runif(1) * 5)]
+      dlfus$start_padded = dlfus$start
+      dlfus$end_padded = dlfus$end
+      dlfus[is_duplicated == TRUE, start_padded := round(jitter(start_padded, amount = 5)) - round(runif(1) * 5)][]
+      dlfus[is_duplicated == TRUE, end_padded := round(jitter(end_padded, amount = 5)) + round(runif(1) * 5)]      
+      dlfus[, padded_fus_gene_coords := paste(
+        seqnames,
+        ":",
+        start_padded, "-", end_padded, sep = ""
+      ), by = listid][]
+      res.fus$fusion_gene_coords = dlfus[, paste(padded_fus_gene_coords, collapse = ","), by = listid]$V1
+      dlfus[, padded_genome_location_coords := paste(
+        seqnames,
+        ":",
+        start_padded, "-", seqnames, ":", end_padded, sep = ""
+      ), by = listid][]
+      ## res.fus$Genome_Location = dlfus[, paste(padded_genome_location_coords, collapse = "|"), by = listid]$V1
+      res.fus$Genome_Location = res.fus$fusion_gene_coords
 
       res.fus$estimated_altered_copies = res.fus$fusion_cn
 
@@ -3139,4 +3479,3 @@ merge_oncokb_multiplicity <- function(
   oncokb_multiplicity$multiplicity_id_match <- skey$subject.id
   return(oncokb_multiplicity)
 }
-
