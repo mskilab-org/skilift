@@ -27,5 +27,5 @@ add_tmb(
 Updated metadata with TMB value added
 }
 \description{
-Calculates and adds tumor mutation burden (TMB) to the metadata based on SNV count and genome length
+Calculates and adds tumor mutation burden (TMB) to the metadata based on SNV count and genome length.
 }
