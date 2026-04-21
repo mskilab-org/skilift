@@ -3024,7 +3024,8 @@ lift_filtered_events <- function(
   show_all_tags = FALSE,
   show_all_small_muts_tags = FALSE,
   show_all_cna_tags = FALSE,
-  show_all_svs_tags = FALSE
+  show_all_svs_tags = FALSE,
+  verbose = FALSE
 ) {
   if (!inherits(cohort, "Cohort")) {
       stop("Input must be a Cohort object")
@@ -3108,7 +3109,11 @@ lift_filtered_events <- function(
       )
     }
     tryCatchLog({
-      main()
+      if (verbose) {
+        out = main()
+      } else {
+        Skilift::shutup(suppressMessages({out = main()}))
+      }
     }, error = function(e) {
       print(sprintf("Error processing %s: %s", row$pair, e$message))
       NULL

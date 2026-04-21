@@ -1,3 +1,5 @@
+
+
 #' @title create_ppfit_json
 #' @description
 #'
@@ -28,15 +30,7 @@ get_segstats <- function(
         stop("Please provide a valid path to a non-integer balanced gGraph file.")
     }
 
-  if (!is.null(tumor_coverage)) {
-    if (is.character(tumor_coverage)) {
-        cov <- readRDS(tumor_coverage)
-    } else {
-        cov <- tumor_coverage
-    }
-  } else {
-      stop("Please provide a valid path to a coverage file.")
-  }
+    cov <- Skilift:::read_coverage_any(tumor_coverage)
 
     ## need to replace NaN with NA or JaBbA:::segstats breaks
     # mcols(cov)[[coverage_field]] <- ifelse(is.nan(mcols(cov)[[coverage_field]]),
@@ -226,7 +220,7 @@ lift_allelic_pp_fit <- function(cohort,
                                 cores = 1,
                                 save_png = TRUE,
                                 save_data = TRUE, 
-                                file.name = "hetsnps_major_minor.png") {
+                                file.name = "hetsnps_major_minor.png", verbose = FALSE) {
     if (!inherits(cohort, "Cohort")) {
         stop("Input must be a Cohort object")
     }
@@ -241,44 +235,54 @@ lift_allelic_pp_fit <- function(cohort,
     }
 
     # Process each sample in parallel
-    mclapply(seq_len(nrow(cohort$inputs)), function(i) {
-        row <- cohort$inputs[i, ]
-        pair_dir <- file.path(output_data_dir, row$pair)
+    iterate_fun = function(i) {
+        submain = function() {
+            row <- cohort$inputs[i, ]
+            pair_dir <- file.path(output_data_dir, row$pair)
 
-        if (!dir.exists(pair_dir)) {
-            dir.create(pair_dir, recursive = TRUE)
+            if (!dir.exists(pair_dir)) {
+                dir.create(pair_dir, recursive = TRUE)
+            }
+
+            #out_file <- file.path(pair_dir, "allelic_pp_fit.json")
+            out_file_png <- file.path(pair_dir, file.name)
+            ppplot <- Skilift::pp_plot(jabba_rds = row[[jabba_column]],
+                    hets.fname = row$het_pileups,
+                    allele = TRUE,
+                    scatter = TRUE,
+                    binwidth = 1e4,
+                    save = FALSE,
+                    field = "count",
+                    verbose = T) 
+
+            if(save_png){
+                ggsave(file = out_file_png, plot = ppplot$plot, width = 6, height = 6, dpi = 300)
+            }
+    
+            if(save_data){
+                write_json(ppplot$data[seqnames %in% c(1:22, "X", "Y"), .(major.cn, minor.cn, jabba_cn, color)], gsub(".png", ".json", out_file_png), pretty = TRUE)
+            }
+            return(invisible(NULL))
+
         }
-
-        #out_file <- file.path(pair_dir, "allelic_pp_fit.json")
-        out_file_png <- file.path(pair_dir, file.name)
+        
 
         futile.logger::flog.threshold("ERROR")
-        tryCatchLog(
-            {
-                ppplot <- Skilift::pp_plot(jabba_rds = row[[jabba_column]],
-                        hets.fname = row$het_pileups,
-                        allele = TRUE,
-                        scatter = TRUE,
-                        binwidth = 1e4,
-                        save = FALSE,
-                        field = "count",
-                        verbose = T) 
-
-                if(save_png){
-                    ggsave(file = out_file_png, plot = ppplot$plot, width = 6, height = 6, dpi = 300)
-                }
-        
-                if(save_data){
-                    write_json(ppplot$data[seqnames %in% c(1:22, "X", "Y"), .(major.cn, minor.cn, jabba_cn, color)], gsub(".png", ".json", out_file_png), pretty = TRUE)
-                }
-                
-            },
+        out = tryCatchLog({
+            if (verbose) {
+                out = submain()
+            } else {
+                out = capture.output(capture.output({out = submain()}, type = "message"), type = "output")
+            }
+        },
             error = function(e) {
                 print(sprintf("Error processing %s: %s", row$pair, e$message))
                 NULL
             }
         )
-    }, mc.cores = cores, mc.preschedule = TRUE)
+        return(out)
+    }
+    sinkvar = mclapply(seq_len(nrow(cohort$inputs)), iterate_fun, mc.cores = cores, mc.preschedule = TRUE)
 
     invisible(NULL)
 }
@@ -1075,11 +1079,12 @@ lift_pp_plot <- function(cohort, output_data_dir, cores = 1) {
 #'         lines stay fixed — peaks aligning with integers indicate a good fit.
 #' }
 #'
-#' @param jabba_path  (character) Optional path to a balanced JaBbA gGraph RDS.
-#'   Pre-populates the file input and loads data automatically if both paths are
-#'   supplied.
-#' @param coverage_path (character) Optional path to a tumor coverage GRanges
-#'   RDS.  Pre-populates the file input.
+#' @param jabba_path  (character or object) Optional path to a balanced JaBbA
+#'   gGraph/segmentation file, or an in-memory segmentation object. If an object
+#'   is supplied, it is written to a temporary RDS and passed to the app.
+#' @param coverage_path (character or object) Optional path to tumor coverage,
+#'   or an in-memory coverage object. If an object is supplied, it is written to
+#'   a temporary RDS and passed to the app.
 #' @param coverage_field (character) Coverage field to use (default
 #'   \code{"foreground"}).
 #' @param ... Additional arguments passed to \code{shiny::runApp()}.
@@ -1088,6 +1093,8 @@ lift_pp_plot <- function(cohort, output_data_dir, cores = 1) {
 ppfit_explorer <- function(jabba_path    = NULL,
                            coverage_path = NULL,
                            coverage_field = "foreground",
+                           launch.browser = FALSE,
+                           host = "0.0.0.0",
                            ...) {
     app_dir <- system.file("shiny", "ppfit_explorer", package = "Skilift")
     if (!nzchar(app_dir) || !dir.exists(app_dir)) {
@@ -1108,12 +1115,29 @@ ppfit_explorer <- function(jabba_path    = NULL,
         }
     }, add = TRUE)
 
-    if (!is.null(jabba_path))
-        Sys.setenv(SKILIFT_JABBA_PATH     = jabba_path)
-    if (!is.null(coverage_path))
-        Sys.setenv(SKILIFT_COVERAGE_PATH  = coverage_path)
+    materialize_app_input <- function(x, prefix) {
+        if (is.null(x)) {
+            return(NULL)
+        }
+
+        if (is.character(x) && length(x) == 1L) {
+            return(x)
+        }
+
+        tmp <- tempfile(pattern = paste0("skilift_", prefix, "_"), fileext = ".rds")
+        saveRDS(x, tmp)
+        tmp
+    }
+
+    app_jabba_path <- materialize_app_input(jabba_path, "jabba")
+    app_coverage_path <- materialize_app_input(coverage_path, "coverage")
+
+    if (!is.null(app_jabba_path))
+        Sys.setenv(SKILIFT_JABBA_PATH     = app_jabba_path)
+    if (!is.null(app_coverage_path))
+        Sys.setenv(SKILIFT_COVERAGE_PATH  = app_coverage_path)
     Sys.setenv(SKILIFT_COVERAGE_FIELD = coverage_field)
-    shiny::runApp(app_dir, ...)
+    shiny::runApp(app_dir, launch.browser = launch.browser, host = host, ...)
 }
 
 

@@ -8,16 +8,19 @@ ppfit_explorer(
   jabba_path = NULL,
   coverage_path = NULL,
   coverage_field = "foreground",
+  launch.browser = FALSE,
+  host = "0.0.0.0",
   ...
 )
 }
 \arguments{
-\item{jabba_path}{(character) Optional path to a balanced JaBbA gGraph RDS.
-Pre-populates the file input and loads data automatically if both paths are
-supplied.}
+\item{jabba_path}{(character or object) Optional path to a balanced JaBbA
+gGraph/segmentation file, or an in-memory segmentation object. If an object
+is supplied, it is written to a temporary RDS and passed to the app.}
 
-\item{coverage_path}{(character) Optional path to a tumor coverage GRanges
-RDS.  Pre-populates the file input.}
+\item{coverage_path}{(character or object) Optional path to tumor coverage,
+or an in-memory coverage object. If an object is supplied, it is written to
+a temporary RDS and passed to the app.}
 
 \item{coverage_field}{(character) Coverage field to use (default
 \code{"foreground"}).}

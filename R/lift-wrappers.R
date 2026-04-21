@@ -360,7 +360,7 @@ lift_mvp <- function(
   if (has_required_columns(cohort, Skilift:::required_columns$metadata, any = TRUE)) {
     Skilift::skimessage("Uploading metadata (tumor type, coverage, other QC, HRD score, MSI score, etc) for available fields via Skilift::lift_metadata()")
     Skilift::shutup({
-      lift_metadata(
+      cohort_meta = lift_metadata(
         cohort = cohort,
         output_data_dir = output_data_dir,
         cores = cores,
@@ -424,7 +424,7 @@ lift_mvp <- function(
   if (has_required_columns(cohort, required_columns$twod_purity_ploidy)) {
     Skilift::skimessage("Uploading 2D purity ploidy plot via Skilift::lift_2d_purity_ploidy_plot()")
     Skilift::shutup({
-      lift_2d_purity_ploidy_plot(
+      sinkvar = lift_2d_purity_ploidy_plot(
         cohort = cohort,
         output_data_dir = output_data_dir,
         cores = cores
@@ -435,7 +435,7 @@ lift_mvp <- function(
   if (has_required_columns(cohort, Skilift:::required_columns$purple_sunrise_plot)) {
     Skilift::skimessage("Uploading sunrise plot via Skilift::lift_purple_sunrise_plot()")
     Skilift::shutup({
-      lift_purple_sunrise_plot(
+      sinkvar = lift_purple_sunrise_plot(
         cohort,
         output_data_dir = output_data_dir,
         cores = cores
@@ -445,13 +445,17 @@ lift_mvp <- function(
 
   if (has_required_columns(cohort, required_columns$allelic_pp_fit)) {
     Skilift::skimessage("Uploading Zi-Ning (Allelic purity ploidy fit) plot via Skilift::lift_allelic_pp_fit()")
-    Skilift::shutup({
-      lift_allelic_pp_fit(
-        cohort = cohort,
-        output_data_dir = output_data_dir,
-        cores = cores
-      )
-    })
+    submain = function() {
+      Skilift::shutup({
+        lift_allelic_pp_fit(
+          cohort = cohort,
+          output_data_dir = output_data_dir,
+          cores = cores
+        )
+      })
+
+    }
+    capture.output({sinkvar = submain()}, type = "output")
   }
 
   return(cohort)

@@ -18,3 +18,4 @@ R/#Cohort.R#
 src/Skilift.so
 **/*/*.pdf
 **.code-workspace
+inst/shiny/ppfit_explorer/#app.R#

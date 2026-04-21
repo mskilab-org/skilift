@@ -16,6 +16,8 @@ oncotable(
   oncokb_snv = NULL,
   oncokb_cna = NULL,
   oncokb_fusions = NULL,
+  oncokb_intragenic_deletions = NULL,
+  oncokb_intragenic_duplications = NULL,
   gencode,
   cytoband,
   verbose = TRUE,

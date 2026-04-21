@@ -1016,6 +1016,8 @@ default_col_mapping <- list(
   oncokb_snv = c("oncokb_snv", "oncokb_maf", "maf"),
   oncokb_cna = c("oncokb_cna", "cna"),
   oncokb_fusions = c("oncokb_fusions", "oncokb_fusion", "fusion_maf"),
+  oncokb_intragenic_deletions = c("oncokb_intragenic_deletions", "intragenic_deletions"),
+  oncokb_intragenic_duplications = c("oncokb_intragenic_duplications", "intragenic_duplications"),
   itdseek_vcf = c("itdseek_vcf"),
   itdseek_rds = c("itdseek_rds"),
   jabba_gg = c("jabba_gg", "jabba_simple", "jabba_rds", "jabba_simple_gg"),

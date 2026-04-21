@@ -10,7 +10,8 @@ lift_allelic_pp_fit(
   cores = 1,
   save_png = TRUE,
   save_data = TRUE,
-  file.name = "hetsnps_major_minor.png"
+  file.name = "hetsnps_major_minor.png",
+  verbose = FALSE
 )
 }
 \arguments{
