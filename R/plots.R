@@ -105,7 +105,7 @@ grab.hets <- function(agt.fname = NULL,
     )
 
     ## make GRanges
-    agt.gr <- dt2gr(agt.melted[, .(seqnames, start, end, count, allele)])
+    agt.gr <- gUtils::dt2gr(agt.melted[, .(seqnames, start, end, count, allele)])
 
     return(agt.gr)
 }

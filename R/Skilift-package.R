@@ -33,7 +33,7 @@
 #' @importMethodsFrom GenomeInfoDb seqnames seqnames<- seqinfo seqinfo<- seqlengths seqlengths<- seqlevels seqlevels<- seqlevelsStyle seqlevelsStyle<- sortSeqlevels
 #' @importMethodsFrom GenomicRanges start end
 #' @importMethodsFrom MatrixGenerics rowRanges
-#' @importMethodsFrom S4Vectors split mcols mcols<- values values<- with within
+#' @importMethodsFrom S4Vectors split mcols mcols<- values values<- with within "%in%" grep grepl
 #' @useDynLib Skilift, .registration=TRUE
 registerS3method(genname = "merge", class = "data.table", method = data.table::merge.data.table)
 "_PACKAGE"

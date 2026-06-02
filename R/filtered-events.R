@@ -1145,8 +1145,8 @@ collect_oncokb_fusions <- function(oncokb_fusions, pge, cytoband, verbose = TRUE
       ## grA <- pge[ixA[!is_na_A]]
       ## grB <- pge[ixB[!is_na_B]]
       coordB = coordA = character(NROW(non_silent_fusions))
-      coordA[!is_na_A] <- gUtils::gr.string(grA)
-      coordB[!is_na_B] <- gUtils::gr.string(grB)
+      coordA[!is_na_A] <- gUtils::gr.string(grA_gene)
+      coordB[!is_na_B] <- gUtils::gr.string(grB_gene)
     } else {
       na.index = integer(0)      
       bp5p_grl = gUtils::parse.grl(
@@ -1543,6 +1543,7 @@ parse_oncokb_tier <- function(
 maf_reconstruct_refalt = function(dt) {
   is_ins = which(dt$Variant_Type == "INS")
   is_del = which(dt$Variant_Type == "DEL")
+  is_snp = which(dt$Variant_Type == "SNP")
   clean_maf_allele = gsub("-", "", dt$Allele)
   clean_maf_ref = gsub("-", "", dt$Reference_Allele)
   fbp = dt$flanking_bps
@@ -1566,7 +1567,7 @@ maf_reconstruct_refalt = function(dt) {
   vcf_alt_reconstructed = character(NROW(dt))
   vcf_alt_reconstructed[is_ins] = clean_maf_allele[is_ins]
   vcf_alt_reconstructed[is_del] = clean_maf_allele[is_del]
-  vcf_alt_reconstructed[is_xnp] = clean_maf_allele[is_xnp]
+  vcf_alt_reconstructed[is_xnp] = dt[is_xnp]$Tumor_Seq_Allele2
   return(
     list(
       vcf_ref_reconstructed = vcf_ref_reconstructed,
@@ -2781,7 +2782,12 @@ create_filtered_events <- function(
       ## gOS frontend expects that the genome location is unique..
       ## This may be violated by fusions that use the same breakpoint
       ## But may annotate a different event due to transcript ambiguity.
-      padded_coords = GenomicRanges::reduce(gUtils::parse.grl(res.fus$fusion_gene_coords) + 250, ignore.strand = TRUE) %>% gUtils::grl.string()
+      coords = res.fus$fusion_gene_coords
+      ix_present = ( function(x) { which(! ( is.na(x) | !nzchar(x) )) } )(coords)
+      grl_coords = gUtils::parse.grl(coords[ix_present])
+      grl_coords_red = GenomicRanges::reduce(grl_coords + 250, ignore.strand = TRUE)
+      padded_coords = gUtils::grl.string(grl_coords_red)
+      ## padded_coords = GenomicRanges::reduce(gUtils::parse.grl(res.fus$fusion_gene_coords) + 250, ignore.strand = TRUE) %>% gUtils::grl.string()
       coord_tbl = data.table::data.table(fusion_gene_coords = padded_coords)[, .(listid = .I, .GRP, iix = seq_len(.N)), by = fusion_gene_coords][order(rank(listid))]
       
       ## coord_tbl = data.table::data.table(fusion_gene_coords = res.fus$fusion_gene_coords)[, .(listid = .I, .GRP, iix = seq_len(.N)), by = fusion_gene_coords][order(rank(listid))]
@@ -2806,8 +2812,11 @@ create_filtered_events <- function(
         seqnames,
         ":",
         start_padded, "-", end_padded, sep = ""
-      ), by = listid][]
-      res.fus$fusion_gene_coords = dlfus[, paste(padded_fus_gene_coords, collapse = ","), by = listid]$V1
+        ), by = listid][]
+      var_gene_coords = character(NROW(res.fus))
+      var_gene_coords[ix_present] = dlfus[, paste(padded_fus_gene_coords, collapse = ","), by = listid]$V1
+      ## res.fus$fusion_gene_coords = dlfus[, paste(padded_fus_gene_coords, collapse = ","), by = listid]$V1
+      res.fus$fusion_gene_coords = var_gene_coords
       dlfus[, padded_genome_location_coords := paste(
         seqnames,
         ":",
@@ -3114,6 +3123,7 @@ lift_filtered_events <- function(
       } else {
         Skilift::shutup(suppressMessages({out = main()}))
       }
+      return(out)
     }, error = function(e) {
       print(sprintf("Error processing %s: %s", row$pair, e$message))
       NULL
@@ -3172,7 +3182,8 @@ merge_oncokb_multiplicity <- function(
   multiplicity, 
   overwrite = FALSE,
   cols.keep = c(
-    "annotation", "ref", "alt", "ref_denoised", "alt_denoised", "normal.ref", "normal.alt", "variant.c", "variant.p",
+    "annotation", "ref", "alt", "ref_denoised", "alt_denoised", "normal.ref", "normal.alt",
+    # "variant.c", "variant.p",
     "variant.g", "major.count", "minor.count", "major_snv_copies", "minor_snv_copies",
     "total_snv_copies", "total_copies", "VAF", "cn", "altered_copies"
   ),
@@ -3275,6 +3286,9 @@ merge_oncokb_multiplicity <- function(
   }
   
   gr_multiplicity$vkey = with(as.data.frame(gr_multiplicity), paste(seqnames, start, REF, ALT))
+  if (anyDuplicated(gr_multiplicity$vkey)) {
+    gr_multiplicity = gr_multiplicity[!duplicated(gr_multiplicity$vkey)]
+  }
   mc_oncokb = S4Vectors::mcols(gr_oncokb)
   if (is.null(mc_oncokb$vcf_ref) || is.null(mc_oncokb$vcf_alt)) {
     lst = Skilift:::maf_reconstruct_refalt(gr_oncokb)
@@ -3299,6 +3313,7 @@ merge_oncokb_multiplicity <- function(
   all_mg = merge(uvkey_oncokb, uvkey_mult, by = "vkey", all = TRUE)
   all_mg$count_x = S4Vectors::elementNROWS(all_mg$uvkey_oncokb)
   all_mg$count_y = S4Vectors::elementNROWS(all_mg$uvkey_mult)
+  all_mg = all_mg[count_x > 0 & count_y > 0]
   all_mg_matched = all_mg[ ! (count_x != 1 | count_y != 1) ]
   all_mg_overmatched = all_mg[  (count_x > 1 | count_y > 1) ]
   all_mg_overmatched = all_mg_overmatched[, {

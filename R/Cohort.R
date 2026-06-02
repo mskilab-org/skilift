@@ -1056,6 +1056,7 @@ default_col_mapping <- list(
   purple_qc = c("purple_qc"),
   purple_pp_bestFit = c("purple_pp_bestFit", "purple_pp_best_fit", "purple_bestFit", "purple_solution"),
   purple_pp_bestFit_revised = c("purple_pp_best_fit_revised"),
+  ichorcna_params = c("ichorcna_params"),
   msisensorpro = c("msisensorpro", "msisensor_pro", "msisensor_pro_results", "msisensor_results"),
   conpair_concordance = c("conpair_concordance"),
   conpair_contamination = c("conpair_contamination"),

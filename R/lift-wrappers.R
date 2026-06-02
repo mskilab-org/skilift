@@ -361,7 +361,7 @@ lift_mvp <- function(
     Skilift::skimessage("Uploading metadata (tumor type, coverage, other QC, HRD score, MSI score, etc) for available fields via Skilift::lift_metadata()")
     Skilift::shutup({
       cohort_meta = lift_metadata(
-        cohort = cohort,
+        cohort = Skilift::copy(cohort),
         output_data_dir = output_data_dir,
         cores = cores,
         genome_length = genome_length
@@ -435,7 +435,7 @@ lift_mvp <- function(
   if (has_required_columns(cohort, Skilift:::required_columns$purple_sunrise_plot)) {
     Skilift::skimessage("Uploading sunrise plot via Skilift::lift_purple_sunrise_plot()")
     Skilift::shutup({
-      sinkvar = lift_purple_sunrise_plot(
+      lift_purple_sunrise_plot(
         cohort,
         output_data_dir = output_data_dir,
         cores = cores
