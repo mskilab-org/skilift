@@ -767,6 +767,7 @@ process_qc_flag = function(
 }
 
 calculate_cosine_similarity = function(A, B) {
+  A[is.na(A)] = 0.0 ## FIXME: something foobar happens in some cases where there are 0 indels.. some channels are marked as NA
   is_allzero_A = all(A < 1e-8 & A > -1e-8)
   is_allzero_B = all(B < 1e-8 & B > -1e-8)
   is_allzero = is_allzero_A || is_allzero_B
@@ -857,7 +858,7 @@ add_signature_cosine_similarity <- function(
         vecB = mat_ref[normalized_channel,sig]
         calculate_cosine_similarity(vecA, vecB)
     }
-    
+
     cosine_similarities = lapply(norm_sigs, itersig)
     names(cosine_similarities) = norm_sigs
 
@@ -1735,6 +1736,18 @@ create_metadata <- function(
     metadata <- add_sv_counts(metadata, jabba_gg)
     # Add purity and ploidy — use direct values if provided, otherwise derive from purple/jabba
     if (!is.null(purity) && !is.null(ploidy)) {
+        purity_numeric = as.numeric(purity)
+        ploidy_numeric = as.numeric(ploidy)
+        is_na_purity = any(is.na(purity_numeric))
+        is_na_ploidy = any(is.na(ploidy_numeric))
+        is_either_na = is_na_purity || is_na_ploidy
+        if (is_either_na) {
+            if (is_na_purity) message("purity is not coercible to numeric value")
+            if (is_na_ploidy) message("ploidy is not coercible to numeric value")
+            stop("purity and ploidy must both be coercible to numeric values")
+        }
+        purity = purity_numeric
+        ploidy = ploidy_numeric
         metadata$purity <- purity
         metadata$ploidy <- ploidy
         metadata$beta <- purity / (purity * ploidy + 2 * (1 - purity))
@@ -1919,10 +1932,7 @@ lift_metadata <- function(
             
             
             futile.logger::flog.threshold("ERROR")
-            tryCatchLog({
-
-                # Create metadata object
-
+            main = function() {
                 metadata <- create_metadata(
                     pair = row[["pair"]],
                     tumor_type = row[["tumor_type"]],
@@ -1966,29 +1976,34 @@ lift_metadata <- function(
                 )
 
                 if (is.null(metadata)) {
-                    print(sprintf("No metadata generated for %s", row$pair))
-                    return()
+                  print(sprintf("No metadata generated for %s", row$pair))
+                  return()
                 }
                 
                 # Write to JSON
                 jsonlite::write_json(
-                    metadata,
-                    out_file,
-                    auto_unbox = TRUE,
-                    pretty = TRUE,
-                    null = "null"
+                  metadata,
+                  out_file,
+                  auto_unbox = TRUE,
+                  pretty = TRUE,
+                  null = "null"
                 )
 
                 return(metadata)
                 
-            }, error = function(e) {
-                print(sprintf("Error processing %s: %s", row$pair, e$message))
-                NULL
             }
-        )
+            ## tryCatchLog({
+            ##     # Create metadata object
+            ##     main()                
+            ## }, error = function(e) {
+            ##     print(sprintf("Error processing %s: %s", row$pair, e$message))
+            ##     NULL
+            ## }
+            ## )
+            main()
     }, mc.cores = cores, mc.preschedule = TRUE)
 
-    metadata_tbls = rbindlist(list_metadata, fill = TRUE)
+    metadata_tbls = data.table::rbindlist(list_metadata, fill = TRUE)
     cohort$inputs = Skilift::merge.repl(cohort$inputs, metadata_tbls, by = "pair", prefer_x = FALSE, prefer_y = TRUE)
 
     # invisible(NULL)
