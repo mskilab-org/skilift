@@ -1853,7 +1853,49 @@ annotation_template = list(
   )
 )
 
-    
+## Shared "missing" sentinel for per-variant annotation fields
+## (AlphaMissense, SIFT, Polyphen2_HVAR, Clinvar, and any future field
+## built the same way). Centralizing this here means every field treats
+## missingness identically: a missing row serializes as an empty object
+## ({}) rather than an explicit string like "Missing" or "Not in Clinvar".
+## Real annotations (e.g. "Ambiguous", "Conflicting pathogenicity",
+## "Not Cancer Related") are NOT missing and must not be listed here.
+MISSING_PRED_TOKENS = c("MISSING", ".", "UNKNOWN")
+MISSING_DESCS = c("Missing", "Not in Clinvar")
+
+#' @title emit_annotation_field
+#' @description
+#' Build the `tlst`-shaped list-column used by `parse_echtvar_oncotable()`
+#' for a single per-variant annotation field (e.g. AlphaMissense, SIFT,
+#' Polyphen2_HVAR, Clinvar). Rows flagged by `is_missing_row` are emitted
+#' as an empty list (which downstream serializes to `{}`); all other rows
+#' are emitted as a populated list of their `dt` columns.
+#'
+#' @param dt data.table with an `IX` row index and the field's columns
+#'   (e.g. class/score/desc), optionally including helper columns to drop
+#'   via `drop_cols` (these are not part of the emitted annotation object).
+#' @param is_missing_row logical vector, one entry per row of `dt`,
+#'   TRUE where the row should be treated as missing (-> `{}`).
+#' @param drop_cols character vector of helper column names to exclude
+#'   from the emitted object (e.g. "is_snv").
+emit_annotation_field = function(dt, is_missing_row, drop_cols = character(0)) {
+  dt = Skilift::copy(dt)
+  dt[, IX := seq_len(.N)]
+  dt[, IS_MISSING := is_missing_row]
+  emit_cols = setdiff(names(dt), c("IX", "IS_MISSING", drop_cols))
+  tlst = dt[,
+    {
+      main = function() {
+        if (IS_MISSING) return(list(dt = list(list())))
+        out = .SD[, emit_cols, with = FALSE]
+        return(list(dt = list(list(as.list(out)))))
+      }
+      main()
+    },
+    by = IX
+  ]
+  return(tlst)
+}
 
 parse_echtvar_oncotable = function(ot) {
   if (!Skilift:::is_oncotable_echtvar_annotated(ot)) return(ot)
@@ -1864,8 +1906,8 @@ parse_echtvar_oncotable = function(ot) {
   is_benign_onc_clinvar = grepl("benign", ot$clinvar_ONC, ignore.case = TRUE)
   is_pathogenic_onc_clinvar = grepl("pathogenic", ot$clinvar_ONC, ignore.case = TRUE)
   is_missing = (
-      ot$clinvar_ONC %in% c("MISSING", "UNKNOWN", ".")
-      & ot$clinvar_CLNDN %in% c("MISSING", "UNKNOWN", ".")
+      ot$clinvar_ONC %in% MISSING_PRED_TOKENS
+      & ot$clinvar_CLNDN %in% MISSING_PRED_TOKENS
   )
   is_cancer_related = grepl(
     glue::glue(
@@ -1919,14 +1961,19 @@ parse_echtvar_oncotable = function(ot) {
 
 
 
+  is_missing_clinvar = (
+    is_missing
+    | selection_string %in% MISSING_DESCS
+    | is.na(selection_string)
+  )
+
   clinvar_dt = data.table(
     # title = "Clinvar",
     class = code,
     score = -1,
     desc = selection_string
   )
-  clinvar_dt[, IX := seq_len(.N)]
-  tlst_clinvar = clinvar_dt[, list(dt = list(list(as.list(.SD)))), by = IX]
+  tlst_clinvar = emit_annotation_field(clinvar_dt, is_missing_clinvar)
 
   ncref = nchar(ot$vcf_ref)
   ncalt = nchar(ot$vcf_alt)
@@ -1947,8 +1994,7 @@ parse_echtvar_oncotable = function(ot) {
     "B" = "Benign",
     "LB" = "Likely Benign",
     "A" = "Ambiguous",
-    "MISSING" = "Missing",
-    "." = "Missing"
+    setNames(rep("Missing", length(MISSING_PRED_TOKENS)), MISSING_PRED_TOKENS)
   )[ot$dbNSFP_AlphaMissense_pred]
 
   code = data.table::fcase(
@@ -1958,33 +2004,26 @@ parse_echtvar_oncotable = function(ot) {
     default = "na"
   )
   
+  is_missing_am = (
+    !is_snv
+    | am_pred %in% MISSING_DESCS
+    | is.na(am_pred)
+  )
+
   am_dt = data.table(
     # title = "AlphaMissense",
     class = code,
     score = ot$dbNSFP_AlphaMissense_score,
-    desc = am_pred,
-    is_snv = is_snv
+    desc = am_pred
   )
 
-  am_dt[, IX := seq_len(.N)]
-
-  tlst_am = am_dt[,
-  {
-    ENV = environment()
-    main = function() {
-      if (!is_snv) return(list(dt = list(list())))
-      out = .SD[, -c("is_snv")]
-      return(list(dt = list(list(as.list(out)))))
-    }
-    main()
-  },  by = IX ]
+  tlst_am = emit_annotation_field(am_dt, is_missing_am)
 
   ## SIFT
   sift_pred = c(
     "T" = "Tolerated",
     "D" = "Damaging",
-    "MISSING" = "Missing",
-    "." = "Missing"
+    setNames(rep("Missing", length(MISSING_PRED_TOKENS)), MISSING_PRED_TOKENS)
   )[ot$dbNSFP_SIFT_pred]
 
   code = data.table::fcase(
@@ -1994,63 +2033,50 @@ parse_echtvar_oncotable = function(ot) {
     default = "na"
   )
   
+  is_missing_sift = (
+    !is_snv
+    | sift_pred %in% MISSING_DESCS
+    | is.na(sift_pred)
+  )
+
   sift_dt = data.table(
     # title = "SIFT",
     class = code,
     score = ot$dbNSFP_SIFT_score,
-    desc = sift_pred,
-    is_snv = is_snv
+    desc = sift_pred
   )
 
-  sift_dt[, IX := seq_len(.N)]
-
-  tlst_sift = sift_dt[,
-  {
-    ENV = environment()
-    main = function() {
-      if (!is_snv) return(list(dt = list(list())))
-      out = .SD[, -c("is_snv")]
-      return(list(dt = list(list(as.list(out)))))
-    }
-    main()
-  },  by = IX ]
+  tlst_sift = emit_annotation_field(sift_dt, is_missing_sift)
 
   ## Polyphen2
   pphen_pred = c(
     "B" = "Benign",
     "D" = "Damaging",
     "P" = "Likely Damaging",
-    "MISSING" = "Missing",
-    "." = "Missing"
+    setNames(rep("Missing", length(MISSING_PRED_TOKENS)), MISSING_PRED_TOKENS)
   )[ot$dbNSFP_Polyphen2_HVAR_pred]
 
   code = data.table::fcase(
-    !vtype == "SNV", "missing",
+    !vtype == "SNV", "na",
     grepl("damaging", pphen_pred, ignore.case = TRUE), "pathogenic",
     pphen_pred == "Benign", "benign",
     default = "na"
   )
   
+  is_missing_pphen = (
+    !is_snv
+    | pphen_pred %in% MISSING_DESCS
+    | is.na(pphen_pred)
+  )
+
   pphen_dt = data.table(
     # title = "Polyphen2 HVAR",
     class = code,
     score = ot$dbNSFP_Polyphen2_HVAR_score,
-    desc = pphen_pred,
-    is_snv = is_snv
+    desc = pphen_pred
   )
 
-  pphen_dt[, IX := seq_len(.N)]
-
-  tlst_pphen = pphen_dt[,
-  {
-    ENV = environment()
-    main = function() {
-      if (!is_snv) return(list(dt = list(list())))
-      out = .SD[, -c("is_snv")]
-      return(list(dt = list(list(as.list(out)))))
-    }
-    main()
-  },  by = IX ]
+  tlst_pphen = emit_annotation_field(pphen_dt, is_missing_pphen)
 
 
   tlst_mg = Reduce(
