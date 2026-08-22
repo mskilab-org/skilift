@@ -1992,15 +1992,15 @@ lift_metadata <- function(
                 return(metadata)
                 
             }
-            ## tryCatchLog({
-            ##     # Create metadata object
-            ##     main()                
-            ## }, error = function(e) {
-            ##     print(sprintf("Error processing %s: %s", row$pair, e$message))
-            ##     NULL
-            ## }
-            ## )
-            main()
+            tryCatchLog({
+                # Create metadata object
+                main()                
+            }, error = function(e) {
+                print(sprintf("Error processing %s: %s", row$pair, e$message))
+                NULL
+            }
+            )
+            ## main()
     }, mc.cores = cores, mc.preschedule = TRUE)
 
     metadata_tbls = data.table::rbindlist(list_metadata, fill = TRUE)

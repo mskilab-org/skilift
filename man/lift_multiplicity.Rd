@@ -13,7 +13,7 @@ lift_multiplicity(
   field = "altered_copies",
   show_only_oncokb = TRUE,
   cores = 1,
-  custom_annotation_fields = list(custom_field = NULL)
+  custom_annotation_fields = list(REPORTED = "Reported")
 )
 }
 \arguments{

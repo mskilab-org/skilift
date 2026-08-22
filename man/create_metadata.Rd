@@ -12,6 +12,8 @@ create_metadata(
   primary_site = NULL,
   inferred_sex = NULL,
   purple_pp_bestFit = NULL,
+  purity = NULL,
+  ploidy = NULL,
   jabba_gg = NULL,
   events = NULL,
   somatic_snvs = NULL,
@@ -60,6 +62,10 @@ create_metadata(
 \item{primary_site}{The primary site of the tumor.}
 
 \item{inferred_sex}{The inferred sex of the sample.}
+
+\item{purity}{Purity value (numeric). If provided directly, used instead of deriving from purple_pp_bestFit or jabba_gg.}
+
+\item{ploidy}{Ploidy value (numeric). If provided directly, used instead of deriving from purple_pp_bestFit or jabba_gg.}
 
 \item{jabba_gg}{A file path to the jabba_gg data.}
 

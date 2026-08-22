@@ -1017,7 +1017,7 @@ collect_oncokb_cna <- function(oncokb_cna, jabba_gg, pge, amp.thresh, del.thresh
         & scna$type == match_lst[2]
         & scna$type == "amp"
       ) | (
-        scna$exon_frac > 0
+        scna$exon_frac > 0 ## FIXME: Too sensitive for noisy/hypersegmented samples (i.e. low purity/bad fits)
         & scna$type == match_lst[2]
         & scna$type == "homdel"
       ),
@@ -1553,7 +1553,7 @@ maf_reconstruct_refalt = function(dt) {
     substring(fbp, 2, nchar(fbp) - 1),
     clean_maf_ref
   )
-  is_xnp = which(nchar(clean_maf_allele) == nchar(clean_maf_ref))
+  is_xnp = setdiff(which(nchar(clean_maf_allele) == nchar(clean_maf_ref)), c(is_ins, is_del))
   is_other = setdiff(seq_len(NROW(dt)), c(is_ins, is_del, is_xnp))
   vcf_ref_reconstructed = unflanked_bps
   ## vcf_ref_reconstructed = character(NROW(dt))
@@ -1604,9 +1604,9 @@ collect_oncokb <- function(oncokb_maf, multiplicity = NA_character_, verbose = T
     is_multiplicity_populated = NROW(multiplicity) > 0
   }
 
-  if (is_oncokb_populated && !is_multiplicity_populated) {
-    stop("Something's off - oncokb is populated with variants, but not multiplicity.")
-  }
+  # if (is_oncokb_populated && !is_multiplicity_populated) {
+  #   stop("Something's off - oncokb is populated with variants, but not multiplicity.")
+  # }
   
   if (is_oncokb_populated && is_multiplicity_populated) {
     oncokb = oncokb[
@@ -1702,6 +1702,39 @@ collect_oncokb <- function(oncokb_maf, multiplicity = NA_character_, verbose = T
           if (!exists("minor.count", where = ENV)) {
             minor.count = NA_real_
           }
+          if (!exists("major_snv_copies", where = ENV)) {
+            major_snv_copies = NA_real_
+          }
+          if (!exists("minor_snv_copies", where = ENV)) {
+            minor_snv_copies = NA_real_
+          }
+          if (!exists("altered_copies", where = ENV)) {
+            altered_copies = NA_real_
+          }
+          if (!exists("segment_cn", where = ENV)) {
+            segment_cn = NA_real_
+          }
+          if (
+              !exists("ref", mode = "character", where = ENV)
+              && !exists("ref", mode = "numeric", where = ENV)
+          ) {
+            ref = NA_real_
+          }
+          if (
+              !exists("alt", mode = "character", where = ENV)
+              && !exists("alt", mode = "numeric", where = ENV)
+          ) {
+            alt = NA_real_
+          }
+          if (
+            !exists("VAF", mode = "character", where = ENV)
+            && !exists("VAF", mode = "numeric", where = ENV)
+          ) {
+            VAF = alt / (ref + alt)
+          }
+          if (!exists("is_multi_hit_per_gene", mode = "character", where = ENV)) {
+            is_multi_hit_per_gene = NA
+          }
           out = list(
             gene = Hugo_Symbol,
             gene_summary = GENE_SUMMARY,
@@ -1739,7 +1772,23 @@ collect_oncokb <- function(oncokb_maf, multiplicity = NA_character_, verbose = T
             vcf_pos = vcf_pos,
             Tumor_Seq_Allele2 = Tumor_Seq_Allele2,
             vcf_ref = vcf_ref,
-            vcf_alt = vcf_alt
+            vcf_alt = vcf_alt,
+            ## transcript_id: prefer MAF Transcript_ID, fall back to Feature.
+            ## Both are populated by the upstream OncoKB annotator from the
+            ## snpEff-derived transcript (e.g. "NM_022552.4").
+            transcript_id = {
+              tx_id_col <- if (exists("Transcript_ID", where = ENV)) {
+                as.character(Transcript_ID)
+              } else {
+                rep(NA_character_, length(Hugo_Symbol))
+              }
+              feature_col <- if (exists("Feature", where = ENV)) {
+                as.character(Feature)
+              } else {
+                rep(NA_character_, length(Hugo_Symbol))
+              }
+              ifelse(!is.na(tx_id_col) & nzchar(tx_id_col), tx_id_col, feature_col)
+            }
           )
           return(out)
         }
@@ -3095,7 +3144,7 @@ lift_filtered_events <- function(
   # Process each sample in parallel
   futile.logger::flog.threshold("ERROR")
   iterate_fun = function(i) {
-    main = function() {
+      main = function() {
       row <- cohort$inputs[i,]
       pair_dir <- file.path(output_data_dir, row$pair)
       
@@ -3108,7 +3157,14 @@ lift_filtered_events <- function(
 
       out = NULL
       string_summary = ""
-
+      if (!all(file.exists(row[["oncotable"]]))) {
+        return(
+          list(
+            pair = row$pair,
+	    strin_summary = ""
+	  )
+        )
+      }
       out <- create_filtered_events(
         pair = row$pair,
         oncotable = row$oncotable,

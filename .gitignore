@@ -19,3 +19,7 @@ src/Skilift.so
 **/*/*.pdf
 **.code-workspace
 inst/shiny/ppfit_explorer/#app.R#
+R/#metadata.R#
+R/filtered-events.R___ORIGINAL
+R/filtered-events.R~
+R/metadata.R~
