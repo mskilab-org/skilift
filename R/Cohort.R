@@ -1062,7 +1062,7 @@ default_col_mapping <- list(
   conpair_contamination = c("conpair_contamination"),
   # Configuration parameters with default values
   metadata_is_visible = structure(c("metadata_is_visible"), default = TRUE),
-  copy_number_graph_max_cn = structure(c("copy_number_graph_max_cn"), default = 100),
+  copy_number_graph_max_cn = structure(c("copy_number_graph_max_cn"), default = 1000),
   copy_number_graph_annotations = structure(c("copy_number_graph_annotations"), default = list(c("bfb", "chromoplexy", "chromothripsis", "del", "dm", "cpxdm", "dup", "pyrgo", "rigma", "simple", "tic", "tyfonas"))),
   multiplicity_node_metadata = structure(c("multiplicity_node_metadata"), default = c("gene", "feature_type", "annotation", "REF", "ALT", "variant.c", "variant.p", "vaf", "transcript_type", "impact", "rank")),
   multiplicity_field = structure(c("multiplicity_field"), default = "altered_copies"),

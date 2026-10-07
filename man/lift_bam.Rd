@@ -4,7 +4,14 @@
 \alias{lift_bam}
 \title{lift_bam}
 \usage{
-lift_bam(cohort, output_data_dir, cores = 1, overwrite = FALSE, copy = FALSE)
+lift_bam(
+  cohort,
+  output_data_dir,
+  cores = 1,
+  overwrite = FALSE,
+  copy = FALSE,
+  symlink = FALSE
+)
 }
 \arguments{
 \item{cohort}{Cohort object containing sample information}
@@ -12,11 +19,39 @@ lift_bam(cohort, output_data_dir, cores = 1, overwrite = FALSE, copy = FALSE)
 \item{output_data_dir}{Base directory for output files}
 
 \item{cores}{Number of cores for parallel processing (default: 1)}
+
+\item{overwrite}{Replace existing destination files or symlinks (default: FALSE).
+Replacement removes the destination link, not the file it points to.}
+
+\item{copy}{Copy original file contents instead of linking (default: FALSE).
+Cannot be combined with \code{symlink = TRUE}.}
+
+\item{symlink}{Create absolute symbolic links directly to the original BAM
+and index files instead of hardlinks (default: FALSE).}
 }
 \value{
 None
 }
 \description{
-Lift bam file to output data directory.
-Currently hardlinking.
+Lift BAM files and indexes to the gOS output data directory. Source symlinks
+(including relative links and chains) are resolved to their original files.
+Hardlinks are used by default; symbolic links and copies are optional.
+}
+\details{
+Outputs are \code{<output_data_dir>/<pair>/tumor.bam}, \code{normal.bam},
+and their \code{.bam.bai} indexes. Index lookup prefers \code{.bam.bai},
+then \code{.bai}, beside the supplied BAM path; if neither exists, it checks
+beside the resolved BAM. Each index is resolved independently.
+
+Hardlinks require the original and destination to be on the same filesystem
+and survive removal of the original path. Symbolic links can cross filesystems
+but require the original paths to remain available to gOS. Neither link mode
+copies BAM contents. Use \code{overwrite = TRUE} to replace previously broken
+destination links. Filesystem operations use GNU \code{ln} and \code{cp}.
+}
+\examples{
+\dontrun{
+lift_bam(cohort, output_data_dir, overwrite = TRUE) # Hardlink original files
+lift_bam(cohort, output_data_dir, symlink = TRUE, overwrite = TRUE)
+}
 }

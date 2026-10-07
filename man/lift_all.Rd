@@ -21,7 +21,8 @@ lift_all(
 
 \item{cores}{Number of cores for parallel processing (default: 1)}
 
-\item{...}{Additional arguments}
+\item{...}{Additional arguments. Use \code{symlink = TRUE} to create absolute
+BAM/index symlinks to the original files instead of the default hardlinks.}
 }
 \value{
 None

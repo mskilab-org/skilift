@@ -2604,6 +2604,7 @@ create_oncotable <- function(
 #' @param jabba_gg JaBbA output ggraph or complex
 #' @param out_file path to write json
 #' @param return_table TRUE/FALSE whether to return the data.table
+#' @param fusion_coord_padding bp padding added to each side of each fusion partner range before reduction, for frontend IGV context (default: 250; use 0 for exact coordinates)
 #' @return data.table or NULL
 #' @export
 create_filtered_events <- function(
@@ -2613,7 +2614,8 @@ create_filtered_events <- function(
     out_file,
     return_table = FALSE,
     cohort_type = "paired",
-    additional_columns = NULL
+    additional_columns = NULL,
+    fusion_coord_padding = 250
     ) {
   ot <- readRDS(oncotable)
 
@@ -2860,7 +2862,11 @@ create_filtered_events <- function(
       coords = res.fus$fusion_gene_coords
       ix_present = ( function(x) { which(! ( is.na(x) | !nzchar(x) )) } )(coords)
       grl_coords = gUtils::parse.grl(coords[ix_present])
-      grl_coords_red = GenomicRanges::reduce(grl_coords + 250, ignore.strand = TRUE)
+      if (!is.numeric(fusion_coord_padding) || length(fusion_coord_padding) != 1 ||
+          is.na(fusion_coord_padding) || fusion_coord_padding < 0) {
+        stop("fusion_coord_padding must be a single non-negative number")
+      }
+      grl_coords_red = GenomicRanges::reduce(grl_coords + fusion_coord_padding, ignore.strand = TRUE)
       padded_coords = gUtils::grl.string(grl_coords_red)
       ## padded_coords = GenomicRanges::reduce(gUtils::parse.grl(res.fus$fusion_gene_coords) + 250, ignore.strand = TRUE) %>% gUtils::grl.string()
       coord_tbl = data.table::data.table(fusion_gene_coords = padded_coords)[, .(listid = .I, .GRP, iix = seq_len(.N)), by = fusion_gene_coords][order(rank(listid))]
@@ -3097,6 +3103,7 @@ create_filtered_events <- function(
 #' @param cohort Cohort object containing sample information
 #' @param output_data_dir Base directory for output files
 #' @param cores Number of cores for parallel processing (default: 1)
+#' @param fusion_coord_padding bp padding added to each side of each fusion partner range before reduction (default: 250; use 0 for exact coordinates)
 #' @return None
 #' @export
 lift_filtered_events <- function(
@@ -3109,7 +3116,8 @@ lift_filtered_events <- function(
   show_all_small_muts_tags = FALSE,
   show_all_cna_tags = FALSE,
   show_all_svs_tags = FALSE,
-  verbose = FALSE
+  verbose = FALSE,
+  fusion_coord_padding = 250
 ) {
   if (!inherits(cohort, "Cohort")) {
       stop("Input must be a Cohort object")
@@ -3172,7 +3180,8 @@ lift_filtered_events <- function(
         out_file = out_file,
         return_table = return_table,
         cohort_type = cohort_type,
-        additional_columns = additional_columns
+        additional_columns = additional_columns,
+        fusion_coord_padding = fusion_coord_padding
       )
       if (identical(cohort_type, "heme")) {
         create_heme_highlights(
