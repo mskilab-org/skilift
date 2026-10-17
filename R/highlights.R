@@ -364,7 +364,7 @@ create_heme_highlights = function(
     gene_mutations = allOutputsForJson
   )
 
-  jsonlite::write_json(
+  provenance_write_json(
     highlights_output, 
     path = out_file,
     na = "null", 

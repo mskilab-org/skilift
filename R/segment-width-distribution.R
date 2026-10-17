@@ -118,6 +118,7 @@ lift_segment_width_distribution <- function(
     # Process each sample in parallel
     mclapply(seq_len(nrow(cohort$inputs)), function(i) {
         row <- cohort$inputs[i, ]
+        .provenance_context <- provenance_context(row, cohort)
         pair_dir <- file.path(output_data_dir, row$pair)
 
         if (!dir.exists(pair_dir)) {
@@ -196,6 +197,7 @@ lift_segment_width_distribution <- function(
                     nfields = fields.keep,
                     save = TRUE
                 )
+                provenance_receipt(out_file)
             },
             error = function(e) {
                 print(sprintf("Error processing %s: %s", row$pair, e$message))
@@ -238,6 +240,7 @@ lift_allelic_pp_fit <- function(cohort,
     iterate_fun = function(i) {
         submain = function() {
             row <- cohort$inputs[i, ]
+            .provenance_context <- provenance_context(row, cohort)
             pair_dir <- file.path(output_data_dir, row$pair)
 
             if (!dir.exists(pair_dir)) {
@@ -260,7 +263,7 @@ lift_allelic_pp_fit <- function(cohort,
             }
     
             if(save_data){
-                write_json(ppplot$data[seqnames %in% c(1:22, "X", "Y"), .(major.cn, minor.cn, jabba_cn, color)], gsub(".png", ".json", out_file_png), pretty = TRUE)
+                provenance_write_json(ppplot$data[seqnames %in% c(1:22, "X", "Y"), .(major.cn, minor.cn, jabba_cn, color)], gsub(".png", ".json", out_file_png), pretty = TRUE)
             }
             return(invisible(NULL))
 
@@ -322,6 +325,7 @@ lift_multiplicity_fits <- function(cohort,
 
     mclapply(seq_len(nrow(cohort$inputs)), function(i) {
         row <- cohort$inputs[i, ]
+        .provenance_context <- provenance_context(row, cohort)
         pair_dir <- file.path(output_data_dir, row$pair)
 
         if (!dir.exists(pair_dir)) {
@@ -426,7 +430,7 @@ process_multiplicity_fit <- function(
 
     # write json to file
     if(save_data) {
-        write_json(binned_hist_data, out_file, pretty = TRUE)
+        provenance_write_json(binned_hist_data, out_file, pretty = TRUE)
     }
 
     # create png
@@ -490,6 +494,7 @@ lift_coverage_jabba_cn <- function(
     # Process each sample in parallel
     mclapply(seq_len(nrow(cohort$inputs)), function(i) {
         row <- cohort$inputs[i, ]
+        .provenance_context <- provenance_context(row, cohort)
         pair_dir <- file.path(output_data_dir, row$pair)
 
         if (!dir.exists(pair_dir)) {
@@ -561,7 +566,7 @@ lift_coverage_jabba_cn <- function(
                 
                 # Save data to JSON if save_data is TRUE
                 if (save_data) {
-                    write_json(tiles.dt, out_file, pretty = TRUE)
+                    provenance_write_json(tiles.dt, out_file, pretty = TRUE)
                 }
 
                 if (save_png) {
@@ -698,6 +703,7 @@ lift_purple_sunrise_plot <- function(
     mclapply(seq_len(nrow(cohort$inputs)), function(i) {
         main = function() {
             row <- cohort$inputs[i, ]
+            .provenance_context <- provenance_context(row, cohort)
             pair_dir <- file.path(output_data_dir, row$pair)
 
             if (!dir.exists(pair_dir)) {
@@ -750,7 +756,7 @@ lift_purple_sunrise_plot <- function(
 
             # Write the processed data to JSON if save_data is TRUE
             if (save_data) {
-                write_json(range[, .(purity, ploidy, score, xmin, xmax, ymin, ymax)], out_file, pretty = TRUE)
+                provenance_write_json(range[, .(purity, ploidy, score, xmin, xmax, ymin, ymax)], out_file, pretty = TRUE)
             }
 
             p <- create_purity_ploidy_plot(range, bestPloidy, bestPurity, minPurity, maxPurity, minPloidy, maxPloidy, use_geom_rect = TRUE)
@@ -980,6 +986,7 @@ lift_pp_plot <- function(cohort, output_data_dir, cores = 1) {
     # Process each sample in parallel
     iterate_function <- function(i) {
         row <- cohort$inputs[i, ]
+        .provenance_context <- provenance_context(row, cohort)
         pair_dir <- file.path(output_data_dir, row$pair)
 
         if (!dir.exists(pair_dir)) {
@@ -1629,12 +1636,14 @@ lift_2d_purity_ploidy_plot <- function(cohort, output_data_dir, cores = 1) {
                     row = cohort$inputs[row, ]
                 }
                 pair = row$pair
+                .provenance_context <- provenance_context(row, cohort)
                 filename = file.path(output_data_dir, row$pair, "multiplicity.png")
                 res_list = create_2d_purity_ploidy(row)
                 pg = res_list$cowplot_obj
                 grDevices::png(filename, height = 1000, width = 2000, pointsize = 12)
                 print(pg)
                 grDevices::dev.off()
+                provenance_receipt(filename)
                 return(invisible(NULL))
             }, error = function(e) {
                 print(sprintf("Error processing %s: %s", row$pair, e$message))

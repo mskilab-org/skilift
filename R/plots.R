@@ -499,7 +499,7 @@ create_somatic_json <- function(plot_metadata, datadir, settings = internal_sett
             if (is_rds)
                 readfun <- function(x) as.data.table(readRDS(x))
             else {
-                readfun <- data.table::fread
+                readfun <- fread
             }
             if (!is_rds && !is_tabular) {
                 message("Expecting .rds or .tsv/.csv/.txt file. Attempting to read anyways as txt file")
@@ -608,7 +608,7 @@ create_germline_json <- function(plot_metadata, datadir, settings = internal_set
             if (is_rds)
                 readfun <- function(x) as.data.table(readRDS(x))
             else {
-                readfun <- data.table::fread
+                readfun <- fread
             }
             if (!is_rds && !is_tabular) {
                 message("Expecting .rds or .tsv/.csv/.txt file. Attempting to read anyways as txt file")
@@ -877,6 +877,7 @@ create_ppfit_genome_json <- function(plot_metadata, datadir, settings = internal
 #' @author Stanley Clarke
 dt2json_mut <- function(dt, patient.id, ref, settings, file_name = paste(getwd(), "test.json", sep = "/"), meta_data = NULL, y_col = NULL) {
     # create vector of seqlengths
+    provenance_note(settings)
     settings_data <- jsonlite::fromJSON(settings)
     chrom_lengths <- as.data.table(settings_data$coordinates$sets[[ref]])[, .(chromosome, startPoint, endPoint)]
     colnames(chrom_lengths) <- c("seqnames", "start", "end")

@@ -78,6 +78,8 @@ lift_bam <- function(cohort, output_data_dir, cores = 1, overwrite = FALSE, copy
     
     upload_bam = function(i) {
         row <- lift_inputs[i,]
+        .provenance_context <- provenance_context(row, cohort)
+        .provenance_context$parameters <- list(copy = copy, symlink = symlink, overwrite = overwrite)
         pair_dir <- file.path(output_data_dir, row$pair)
         
         if (!dir.exists(pair_dir)) {
@@ -104,8 +106,16 @@ lift_bam <- function(cohort, output_data_dir, cores = 1, overwrite = FALSE, copy
                 }
                 bai_source = normalizePath(bai_path, mustWork = TRUE)
 
-                transfer_file(bam_source, file.path(pair_dir, paste0(sample_type, ".bam")))
-                transfer_file(bai_source, file.path(pair_dir, paste0(sample_type, ".bam.bai")))
+                for (kind in c("bam", "bai")) {
+                    source <- if (kind == "bam") bam_source else bai_source
+                    destination <- file.path(pair_dir, paste0(sample_type, if (kind == "bam") ".bam" else ".bam.bai"))
+                    link <- Sys.readlink(destination)
+                    existed <- file.exists(destination) || (!is.na(link) && nzchar(link))
+                    .provenance_context$sources <- list()
+                    provenance_note(if (kind == "bam") bam_path else bai_path)
+                    transfer_file(source, destination)
+                    if (!existed || all(overwrite)) provenance_receipt(destination)
+                }
             }
         }, error = function(e) {
             print(sprintf("Error processing %s: %s", row$pair, e$message))

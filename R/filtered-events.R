@@ -29,10 +29,11 @@ process_gencode <- function(gencode = NULL, assembly = NULL, seqlevelsstyle = "N
   if (is_existent_path && is_rds) {
     gencode <- readRDS(gencode)
   } else if (is_existent_path && is_gff) {
+    provenance_note(gencode)
     gencode <- rtracklayer::import(gencode)
     
   } else if (is_existent_path) {
-    gencode = data.table::fread(gencode)
+    gencode = fread(gencode)
     gencode = tryCatch(
       gUtils::dt2gr(gencode),
       error = function(e) "ERR"
@@ -178,7 +179,7 @@ process_cytoband <- function(cyto = NULL, coarse = FALSE) {
       cyto <- readRDS(cyto)
       return(cyto)
     } else {
-      cyto <- data.table::fread(cyto)
+      cyto <- fread(cyto)
     }
   }
 
@@ -620,6 +621,7 @@ get_gene_copy_numbers <- function(
         gg = readRDS(gg)
     }
     if (!inherits(gene_ranges, "GRanges")) {
+        provenance_note(gene_ranges)
         gene_ranges = rtracklayer::import(gene_ranges)
     }
     if (!(output_type %in% c("GRanges", "data.table"))) {
@@ -727,11 +729,123 @@ get_gene_copy_numbers <- function(
     return(dt2gr(gene_cn_table, seqlengths = seqlengths(gene_ranges)))
 }
 
+# Coverage uses each transcript's complete CDS union, or its exon union if it
+# has no CDS. Only already-nominated event intervals contribute to the numerator.
+get_transcript_cna_coverage <- function(gene_cn_segments, gencode) {
+  empty <- data.table::data.table(
+    gene_name = character(), type = character(), transcript_id = character(),
+    coverage_basis = character(), feature_width = numeric(),
+    overlapped_width = numeric(), coverage_fraction = numeric()
+  )
+  segments <- gene_cn_segments[!is.na(type), .(
+    seqnames, start, end, gene_name = as.character(gene_name),
+    type = as.character(type)
+  )]
+  if (nrow(segments) == 0L) return(empty)
+
+  if (!all(c("gene_name", "type", "transcript_id") %in%
+           colnames(S4Vectors::mcols(gencode)))) {
+    stop("gencode must contain gene_name, type, and transcript_id metadata")
+  }
+  feature_rows <- which(gencode$type %in% c("CDS", "exon"))
+  features <- data.table::data.table(
+    gene_name = as.character(gencode$gene_name[feature_rows]),
+    transcript_id = as.character(gencode$transcript_id[feature_rows]),
+    coverage_basis = as.character(gencode$type[feature_rows]),
+    row_id = feature_rows
+  )
+  if (any(is.na(features$gene_name) | features$gene_name == "")) {
+    stop("CDS/exon records must have non-empty gene_name and transcript_id")
+  }
+  features <- features[gene_name %in% segments$gene_name]
+  if (any(is.na(features$transcript_id) | features$transcript_id == "")) {
+    stop("CDS/exon records must have non-empty gene_name and transcript_id")
+  }
+  if (nrow(features) == 0L) return(empty)
+
+  # Select the basis before intersecting; non-overlapping CDS never falls back
+  # to exons. Sorted composite groups avoid collisions in transcript IDs.
+  features <- features[, .SD[coverage_basis ==
+    if (any(coverage_basis == "CDS")) "CDS" else "exon"],
+    keyby = .(gene_name, transcript_id)]
+  features[, transcript_group := .GRP, by = .(gene_name, transcript_id)]
+  transcripts <- unique(features[, .(
+    gene_name, transcript_id, coverage_basis, transcript_group
+  )])
+  reduced_features <- GenomicRanges::reduce(
+    split(gencode[features$row_id], features$transcript_group),
+    ignore.strand = TRUE
+  )
+  feature_groups <- rep(as.integer(names(reduced_features)),
+                        S4Vectors::elementNROWS(reduced_features))
+  feature_ranges <- unlist(reduced_features, use.names = FALSE)
+  feature_widths <- data.table::data.table(
+    transcript_group = feature_groups,
+    feature_width = as.numeric(width(feature_ranges))
+  )[, .(feature_width = sum(feature_width)), by = transcript_group]
+  transcripts[feature_widths, on = "transcript_group",
+              feature_width := i.feature_width]
+  if (!any(transcripts$feature_width > 0)) return(empty)
+
+  data.table::setorder(segments, gene_name, type)
+  segments[, event_group := .GRP, by = .(gene_name, type)]
+  events <- unique(segments[, .(gene_name, type, event_group)])
+  event_ranges <- GenomicRanges::GRanges(
+    seqnames = segments$seqnames,
+    ranges = IRanges::IRanges(start = segments$start, end = segments$end)
+  )
+  reduced_events <- GenomicRanges::reduce(
+    split(event_ranges, segments$event_group), ignore.strand = TRUE
+  )
+  event_groups <- rep(as.integer(names(reduced_events)),
+                      S4Vectors::elementNROWS(reduced_events))
+  event_ranges <- unlist(reduced_events, use.names = FALSE)
+
+  result <- merge(
+    events[, .(gene_name, type)],
+    transcripts[feature_width > 0, .(
+      gene_name, transcript_id, coverage_basis, feature_width
+    )],
+    by = "gene_name", allow.cartesian = TRUE
+  )
+  result[, overlapped_width := 0]
+  hits <- IRanges::findOverlaps(event_ranges, feature_ranges, ignore.strand = TRUE)
+  event_hits <- S4Vectors::queryHits(hits)
+  feature_hits <- S4Vectors::subjectHits(hits)
+  event_ids <- event_groups[event_hits]
+  transcript_ids <- feature_groups[feature_hits]
+  same_gene <- events$gene_name[event_ids] == transcripts$gene_name[transcript_ids]
+  if (any(same_gene)) {
+    event_ids <- event_ids[same_gene]
+    transcript_ids <- transcript_ids[same_gene]
+    overlaps <- data.table::data.table(
+      gene_name = events$gene_name[event_ids],
+      type = events$type[event_ids],
+      transcript_id = transcripts$transcript_id[transcript_ids],
+      overlapped_width = as.numeric(width(GenomicRanges::pintersect(
+        event_ranges[event_hits[same_gene]],
+        feature_ranges[feature_hits[same_gene]], ignore.strand = TRUE
+      )))
+    )[, .(overlapped_width = sum(overlapped_width)),
+      by = .(gene_name, type, transcript_id)]
+    result[overlaps, on = .(gene_name, type, transcript_id),
+           overlapped_width := i.overlapped_width]
+  }
+  result[, coverage_fraction := overlapped_width / feature_width]
+  data.table::setorder(result, gene_name, type, transcript_id)
+  data.table::setcolorder(result, names(empty))
+  result
+}
+
 #' Get gene amplifications and deletions from jabba object
 #'
 #' Copied from github::mskilab-org/skitools.
 #' This function takes in a jabba object and returns
 #' amplifications and deletions
+#' with unchanged gene-body CN nomination. Each gene/event row includes
+#' max_transcript_fraction and a transcript_coverage data.table list-column.
+#' Evidence covers each transcript's complete CDS union, or exon union when
+#' no CDS is annotated; unevaluable gene/events have zero and empty evidence.
 #'
 #' @param jab character path to jabba file or gGraph object
 get_gene_ampdels_from_jabba <- function(jab, pge, amp.thresh = 4, del.thresh = 0.5, nseg = NULL, min_cn_quantile_threshold = 0.1, max_cn_quantile_threshold = 0.9) {
@@ -747,21 +861,9 @@ get_gene_ampdels_from_jabba <- function(jab, pge, amp.thresh = 4, del.thresh = 0
     max_cn_quantile_threshold = max_cn_quantile_threshold
   )
   gene_CN[, `:=`(type, NA_character_)]
-  gencode = dynGet("gencode", inherits = TRUE, minframe = 0L) ## FIXME: kind of dangerous to get the variable from a parent environment.
-  exons_merged = GenomicRanges::reduce(gUtils::gr_construct_by(gencode[gencode$type == "exon"], by = "gene_name"))
-  ## exons_merged = gUtils::gr_deconstruct_by(exons_merged, meta = TRUE, "gene_name")
-  exons_merged$exon_width = width(exons_merged)
-  gr_gene_cn = dt2gr(gene_CN)
-  gr_gene_cn = gUtils::gr_construct_by(gr_gene_cn, by = "gene_name")
-  exons_merged = dt2gr(gr2dt(exons_merged)[, total_exon_width := sum(exon_width), by = seqnames])
-  ## gr_gene_cn = gUtils::gr.val(gr_gene_cn, exons_merged, val = c("exon_width"), mean = FALSE)
-  exon_cn = gr2dt(gr_gene_cn %*% exons_merged)
-  exon_cn_map = exon_cn[, .(overlapped_exon_width = sum(width), total_exon_width = total_exon_width[1]), keyby = query.id]
-  exon_cn_map = exon_cn_map[list(seq_len(NROW(gene_CN)))]
-  #   gene_CN[min_normalized_cn >= amp.thresh, `:=`(type, "amp")]
-
-  gene_CN$overlapped_exon_width = exon_cn_map$overlapped_exon_width
-  gene_CN$total_exon_width = exon_cn_map$total_exon_width
+  # Search caller frames before the global annotation; inherited lookup can
+  # otherwise reach the global binding through the namespace first.
+  gencode = dynGet("gencode", inherits = FALSE, minframe = 0L)
 
   gene_CN[min_quantile_normalized_cn >= amp.thresh & cn >= min_quantile_normalized_cn, `:=`(type, "amp")]
   gene_CN[min_cn > 1 & cn > 1 & min_normalized_cn < del.thresh, `:=`(
@@ -773,6 +875,7 @@ get_gene_ampdels_from_jabba <- function(jab, pge, amp.thresh = 4, del.thresh = 0
   gene_CN[min_cn == 0 & cn == min_cn, `:=`(type, "homdel")]
 
   gene_CN[type == "amp", min_cn := min_quantile_cn]
+  transcript_detail <- get_transcript_cna_coverage(gene_CN, gencode)
 
   # scna_result = gene_CN[!is.na(type)]
   scna_result = (
@@ -790,8 +893,7 @@ get_gene_ampdels_from_jabba <- function(jab, pge, amp.thresh = 4, del.thresh = 0
         avg_cn = avg_cn[1],
         number_of_cn_segments = number_of_cn_segments[1],
         gene_width = gene_width[1],
-        total_node_width = sum(width), # This must be calculated after nominating SCNA type, not before.,
-        exon_frac = sum(overlapped_exon_width / total_exon_width, na.rm = TRUE)
+        total_node_width = sum(width) # This must be calculated after nominating SCNA type, not before.
       ), 
       by = .(gene_name, type)]
   )
@@ -800,6 +902,25 @@ get_gene_ampdels_from_jabba <- function(jab, pge, amp.thresh = 4, del.thresh = 0
     scna_result,
     !is.na(scna_result$type)
   )
+
+  empty_detail <- transcript_detail[0, .(
+    transcript_id, coverage_basis, feature_width, overlapped_width, coverage_fraction
+  )]
+  scna_result <- cbind(scna_result, data.table::data.table(
+    max_transcript_fraction = numeric(nrow(scna_result)),
+    transcript_coverage = rep(list(empty_detail), nrow(scna_result))
+  ))
+  if (nrow(transcript_detail) > 0L) {
+    coverage_summary <- transcript_detail[, .(
+      max_transcript_fraction = max(coverage_fraction),
+      transcript_coverage = list(.SD)
+    ), by = .(gene_name, type), .SDcols = names(empty_detail)]
+    # An update join preserves the existing gene/event row order and CN fields.
+    scna_result[coverage_summary, on = .(gene_name, type), `:=`(
+      max_transcript_fraction = i.max_transcript_fraction,
+      transcript_coverage = i.transcript_coverage
+    )]
+  }
 
   return(scna_result)
 }
@@ -920,6 +1041,7 @@ collect_gene_mutations <- function(
   }
   if (verbose) message("bcftools found at: ", local_bcftools_path)
 
+  provenance_note(annotated_bcf)
   bcf <- skitools::grok_bcf(
     annotated_bcf,
     label = "sample",
@@ -975,6 +1097,10 @@ collect_gene_mutations <- function(
 #' @title collect_oncokb_cna
 #' @description
 #' Collects OncoKB CNA data from a specified file and processes it.
+#' After gene-body CN nomination, at least one transcript must have coverage
+#' strictly above 0.9 for AMP or above zero for HOMDEL. CDS bases are used per
+#' transcript when present, otherwise exon bases; transcript evidence is not
+#' included in this collector's flat output. The direct JaBbA route is ungated.
 #'
 #' @param oncokb_cna Path to the oncokb CNA file.
 #' @param verbose Logical flag to indicate if messages should be printed.
@@ -985,7 +1111,7 @@ collect_oncokb_cna <- function(oncokb_cna, jabba_gg, pge, amp.thresh, del.thresh
     return(data.table(type = NA, source = "oncokb_cna"))
   }
 
-  oncokb_cna <- data.table::fread(oncokb_cna)
+  oncokb_cna <- fread(oncokb_cna)
 
   nseg = NULL
   if (!is.null(karyograph) && file.exists(karyograph)) {
@@ -1013,11 +1139,11 @@ collect_oncokb_cna <- function(oncokb_cna, jabba_gg, pge, amp.thresh, del.thresh
       valid_gene = scna[
           ## scna$total_node_width > 1e3
       (
-        scna$exon_frac > 0.9
+        scna$max_transcript_fraction > 0.9
         & scna$type == match_lst[2]
         & scna$type == "amp"
       ) | (
-        scna$exon_frac > 0 ## FIXME: Too sensitive for noisy/hypersegmented samples (i.e. low purity/bad fits)
+        scna$max_transcript_fraction > 0 ## FIXME: Too sensitive for noisy/hypersegmented samples (i.e. low purity/bad fits)
         & scna$type == match_lst[2]
         & scna$type == "homdel"
       ),
@@ -1080,7 +1206,7 @@ collect_oncokb_fusions <- function(oncokb_fusions, pge, cytoband, verbose = TRUE
     return(out)
   }
 
-  oncokb_fusions <- data.table::fread(oncokb_fusions)
+  oncokb_fusions <- fread(oncokb_fusions)
 
   if (NROW(oncokb_fusions) > 0) {
     oncokb_fusions <- parse_oncokb_tier(
@@ -1303,13 +1429,13 @@ collect_oncokb_intragenic <- function(
 
   if (all(file.exists(oncokb_intragenic_deletions))) {
       is_intragenic_deletion_present = TRUE
-      oncokb_intragenic_deletions <- data.table::fread(oncokb_intragenic_deletions)
+      oncokb_intragenic_deletions <- fread(oncokb_intragenic_deletions)
   }
       
 
   if (all(file.exists(oncokb_intragenic_duplications))) {
       is_intragenic_duplication_present = TRUE
-      oncokb_intragenic_duplications <- data.table::fread(oncokb_intragenic_duplications)
+      oncokb_intragenic_duplications <- fread(oncokb_intragenic_duplications)
   }
 
   is_neither_present = !is_intragenic_deletion_present && !is_intragenic_duplication_present
@@ -1594,7 +1720,7 @@ collect_oncokb <- function(oncokb_maf, multiplicity = NA_character_, verbose = T
   }
 
   # snpeff_ontology = readRDS(system.file("extdata", "data", "snpeff_ontology.rds", package = "Skilift"))
-  oncokb <- data.table::fread(oncokb_maf, colClasses = c("Chromosome" = "character"))
+  oncokb <- fread(oncokb_maf, colClasses = c("Chromosome" = "character"))
   is_multiplicity_present = is.character(multiplicity) && NROW(multiplicity) == 1 && !is_loosely_na(multiplicity) && file.exists(multiplicity)
   is_oncokb_populated = NROW(oncokb) > 0
 
@@ -1809,6 +1935,7 @@ merge_annotations = function(onco, annotated_vcf, fields = Skilift:::echtvar_vcf
   if (is_vcf_path && !all(file.exists(annotated_vcf))) stop("annotated_vcf path does not exist to merge with oncotable")
   if (is_vcf_path) {
    
+    provenance_note(annotated_vcf)
     annotated_vcf = gGnome:::read_vcf(annotated_vcf)
   }
 
@@ -2385,6 +2512,7 @@ oncotable <- function(
 
   are_somatic_variant_annotations_fields_in_vcf = FALSE
   if (is_vcf_present) {
+    provenance_note(somatic_variant_annotations)
     vcfheader = VariantAnnotation::scanVcfHeader(somatic_variant_annotations)
     fields_info = rownames(VariantAnnotation::info(vcfheader))
     fields_geno = rownames(VariantAnnotation::geno(vcfheader))
@@ -2478,8 +2606,10 @@ create_oncotable <- function(
     message("using default gencode: /gpfs/data/imielinskilab/DB/GENCODE/gencode.v19.annotation.gtf.nochr.rds")
   }
 
+  .provenance_context <- provenance_context(list(), cohort)
   gencode <- process_gencode(gencode)
   cytoband <- process_cytoband(cytoband)
+  reference_sources <- .provenance_context$sources
 
   if (amp_thresh_multiplier == 1.5) {
     message("using default amp_thres_multiplier: 1.5")
@@ -2504,6 +2634,11 @@ create_oncotable <- function(
   iterfun = function(i) {
     main = function() {
       row <- cohort$inputs[i]
+      .provenance_context <- provenance_context(row, cohort)
+      .provenance_context$sources <- reference_sources
+      .provenance_context$selection <- list(graphColumn = jabba_column)
+      .provenance_context$parameters <- list(amp.thresh = amp_thresh_multiplier,
+        del.thresh = 0.5, filter = "PASS", somatic_variant_annotations_fields = somatic_variant_annotations_fields)
 
       # Create output directory for this pair
       pair_outdir <- file.path(outdir, row$pair)
@@ -2567,6 +2702,7 @@ create_oncotable <- function(
         # Save successful results
         oncotable_path <- file.path(pair_outdir, "oncotable.rds")
         saveRDS(oncotable_result, oncotable_path)
+        provenance_receipt(oncotable_path)
         fwrite(oncotable_result, file.path(pair_outdir, "oncotable.txt"))
         return(list(index = i, path = oncotable_path))
       }
@@ -3080,7 +3216,7 @@ create_filtered_events <- function(
 
   }
 
-  jsonlite::write_json(
+  provenance_write_json(
     res.final, 
     out_file, 
     pretty = TRUE, 
@@ -3154,6 +3290,7 @@ lift_filtered_events <- function(
   iterate_fun = function(i) {
       main = function() {
       row <- cohort$inputs[i,]
+      .provenance_context <- provenance_context(row, cohort)
       pair_dir <- file.path(output_data_dir, row$pair)
       
       if (!dir.exists(pair_dir)) {
@@ -3287,7 +3424,7 @@ merge_oncokb_multiplicity <- function(
   is_oncokb_txt = is_exists_oncokb && grep("(c|t)sv$|maf$|txt$", oncokb)
 
   if (is_oncokb_txt) {
-    oncokb <- data.table::fread(oncokb)
+    oncokb <- fread(oncokb)
   } else if (is_oncokb_rds) {
     oncokb <- readRDS(oncokb)
   }

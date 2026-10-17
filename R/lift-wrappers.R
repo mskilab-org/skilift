@@ -154,6 +154,9 @@ lift_all <- function(
     dir.create(output_data_dir, recursive = TRUE)
   }
 
+  cohort <- provenance_begin_upload(cohort, output_data_dir,
+    arguments = c(list(cores = cores, genome_length = genome_length, width = width, gencode = gencode), list(...)))
+
   if (!is.null(cohort$nextflow_results_path)) {
     oncotable_dir <- file.path(cohort$nextflow_results_path, "oncotable")
   } else {
@@ -199,6 +202,8 @@ lift_all <- function(
     )
   }
 
+  # Fold all successful receipts after BAMs, QC plots, and paired-mode outputs.
+  lift_datafiles_json(output_data_dir = output_data_dir, cores = cores)
   datafiles_json_path <- file.path(dirname(output_data_dir), "datafiles.json")
   if (!file.exists(datafiles_json_path)) {
     warning("Creating datafiles.json directory")
@@ -497,4 +502,3 @@ lift_paired <- function(cohort, output_data_dir, oncotable_dir, cores, ...) {
   return(cohort)
 
 }
-

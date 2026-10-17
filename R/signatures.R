@@ -137,6 +137,7 @@ lift_signatures <- function(cohort, output_data_dir, cores = 1) {
     # Process each sample in parallel
     mclapply(seq_len(nrow(cohort$inputs)), function(i) {
         row <- cohort$inputs[i,]
+        .provenance_context <- provenance_context(row, cohort)
         pair_dir <- file.path(output_data_dir, row$pair)
         
         if (!dir.exists(pair_dir)) {
@@ -150,13 +151,14 @@ lift_signatures <- function(cohort, output_data_dir, cores = 1) {
                 for (process_type in names(signature_configs[[sig_type]])) {
                     config <- signature_configs[[sig_type]][[process_type]]
                     input_file <- row[[config$input_col]]
+                    .provenance_context$sources <- list()
                     
                     if (file.exists(input_file)) {
                         result <- config$processor(
                             input_file,
                             is_indel = config$is_indel
                         )
-                        jsonlite::write_json(
+                        provenance_write_json(
                             result,
                             file.path(pair_dir, config$output_file),
                             pretty = TRUE

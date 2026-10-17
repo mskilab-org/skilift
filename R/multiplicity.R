@@ -498,6 +498,7 @@ multiplicity_to_intervals <- function(
     subsample_size = NULL ## Was 1000 previously, frontend now can handle more.. 
 ) {
     # Load chromosome lengths from settings
+    provenance_note(settings)
     settings_data <- jsonlite::fromJSON(settings)
     chrom_lengths <- as.data.table(
         settings_data$coordinates$sets[[reference_name]])[
@@ -712,6 +713,7 @@ lift_multiplicity <- function(
     # Process each sample in parallel
     mclapply(seq_len(nrow(cohort$inputs)), function(i) {
         row <- cohort$inputs[i,]
+        .provenance_context <- provenance_context(row, cohort)
         pair_dir <- file.path(output_data_dir, row$pair)
         
         if (!dir.exists(pair_dir)) {
@@ -749,7 +751,7 @@ lift_multiplicity <- function(
             )
             
             # Write to JSON
-            jsonlite::write_json(
+            provenance_write_json(
                 intervals_list,
                 out_file,
                 pretty = TRUE,

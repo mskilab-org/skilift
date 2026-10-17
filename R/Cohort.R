@@ -191,6 +191,11 @@ Cohort <- R6Class("Cohort",
 
     #' @field character
     nextflow_results_path = NULL,
+    provenance_input_path = NULL,
+    provenance_column_mapping = NULL,
+    provenance_cached_cohort = NULL,
+    provenance_upload = NULL,
+    provenance_remapping = NULL,
 
     #' @description
     #' Initialize a new Cohort object
@@ -210,6 +215,16 @@ Cohort <- R6Class("Cohort",
                           ...
                           ) {
       main = function() {
+        # Restore an explicit saved cohort without column/path discovery or DB merges.
+        if (inherits(x, "Cohort")) {
+          for (field in c("reference_name", "type", "nextflow_results_path", "path_patterns",
+                          "cohort_cols_to_x_cols", "provenance_input_path", "provenance_column_mapping",
+                          "provenance_cached_cohort", "provenance_upload", "provenance_remapping")) {
+            self[[field]] <- x[[field]]
+          }
+          self$inputs <- data.table::copy(x$inputs)
+          return(invisible(self))
+        }
         self$reference_name <- reference_name
 
         # Merge user-provided mapping with default mapping
@@ -250,6 +265,7 @@ Cohort <- R6Class("Cohort",
             path_to_outputs_csv = x
           }
           dt = data.table(read.csv(path_to_outputs_csv, colClasses = c("patient_id" = "character", "pair" = "character", "patient" = "character")))
+          self$provenance_input_path <- normalizePath(path_to_outputs_csv, mustWork = TRUE)
           self$inputs <- private$construct_from_datatable(dt)[]
         } else if (is_tabular) {
           self$inputs <- private$construct_from_datatable(x)[]
@@ -770,6 +786,7 @@ Cohort <- R6Class("Cohort",
 
         if (!is.null(found_col)) {
           result_dt[, (cohort_col) := dt[[found_col]]]
+          self$provenance_column_mapping[[cohort_col]] <- found_col
           # Remove matched column from candidates
           remaining_dt_cols <- setdiff(remaining_dt_cols, found_col)
         }
@@ -796,6 +813,7 @@ Cohort <- R6Class("Cohort",
 
         if (!is.null(found_col)) {
           result_dt[, (cohort_col) := dt[[found_col]]]
+          self$provenance_column_mapping[[cohort_col]] <- found_col
           # Remove matched column from candidates
           remaining_dt_cols <- setdiff(remaining_dt_cols, found_col)
         } else if (!is.null(default_value) && nrow(dt) > 0) {
@@ -1234,7 +1252,9 @@ cohort_attributes <- c(
   "inputs",
   "reference_name",
   "type",
-  "nextflow_results_path"
+  "nextflow_results_path",
+  "provenance_input_path", "provenance_column_mapping", "provenance_cached_cohort",
+  "provenance_upload", "provenance_remapping"
 )
 
 

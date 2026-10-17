@@ -57,6 +57,10 @@ test_that("symlink migration points directly at absolute original paths", {
 
     lift_bam(fixture$cohort, fixture$output_dir, symlink = TRUE)
     expect_equal(Sys.readlink(fixture$destinations), normalizePath(fixture$sources))
+    receipts <- file.path(dirname(fixture$destinations), ".provenance", paste0(basename(fixture$destinations), ".json"))
+    expect_true(all(file.exists(receipts)))
+    records <- lapply(receipts, jsonlite::read_json)
+    expect_true(all(vapply(records, function(x) identical(x$evidence, "captured") && length(x$sources) == 1L, logical(1))))
     unlink(fixture$staged_dir, recursive = TRUE)
     expect_equal(vapply(fixture$destinations, readLines, character(1), USE.NAMES = FALSE), fixture$payloads)
 })

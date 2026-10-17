@@ -44,6 +44,8 @@ lift_copy_number_graph <- function(
     # Process each sample in parallel
     mclapply(seq_len(nrow(cohort$inputs)), function(i) {
         row <- cohort$inputs[i,]
+        .provenance_context <- provenance_context(row, cohort)
+        .provenance_context$selection <- list(graphColumn = cn_column, isAllelic = is_allelic)
         pair_dir <- file.path(output_data_dir, row$pair)
         
         if (!dir.exists(pair_dir)) {
@@ -83,6 +85,7 @@ lift_copy_number_graph <- function(
                 }
                 
                 # Check sequence names overlap with reference
+                provenance_note(settings)
                 seq_lengths <- gGnome::parse.js.seqlengths(
                     settings,
                     js.type = "PGV",
@@ -135,6 +138,7 @@ lift_copy_number_graph <- function(
                 # Generate and write JSON
                 message(sprintf("Writing copy number graph JSON for %s", row$pair))
                 do.call(gGnome::refresh(ggraph.reduced)$json, params)
+                provenance_receipt(out_file)
             } else {
                 warning(sprintf("Copy number graph file missing for %s", row$pair))
             }

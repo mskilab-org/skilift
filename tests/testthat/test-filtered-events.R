@@ -30,6 +30,53 @@ setup({
   cytoband <<- readRDS(cytoband_path)
 })
 
+# Finite, shared seqinfo keeps graph and annotation overlaps on the same genome.
+cna_test_ranges <- function(start, end, type, transcript_id = NA_character_,
+                            gene_name = "GENE1", strand = "*") {
+  GenomicRanges::GRanges(
+    "1", IRanges::IRanges(start, end), strand = strand,
+    seqinfo = GenomeInfoDb::Seqinfo("1", seqlengths = 10000),
+    gene_name = gene_name, gene_id = gene_name, type = type,
+    transcript_id = transcript_id
+  )
+}
+
+cna_test_graph <- function(start, end, cn) {
+  nodes <- GenomicRanges::GRanges(
+    "1", IRanges::IRanges(start, end), strand = "+",
+    seqinfo = GenomeInfoDb::Seqinfo("1", seqlengths = 10000),
+    cn = cn, type = "REF", col = "#FF0000"
+  )
+  gGnome::gG(
+    nodes = nodes,
+    edges = data.table::data.table(
+      n1 = seq_len(length(nodes) - 1L), n2 = seq_len(length(nodes) - 1L) + 1L,
+      n1.side = 1L, n2.side = 0L
+    ),
+    meta = list(purity = 0.8, ploidy = 2)
+  )
+}
+
+cna_test_transcript <- function(id, exon_start, exon_end,
+                                cds_start = numeric(), cds_end = numeric()) {
+  cna_test_ranges(
+    c(min(exon_start), exon_start, cds_start),
+    c(max(exon_end), exon_end, cds_end),
+    c("transcript", rep("exon", length(exon_start)), rep("CDS", length(cds_start))),
+    transcript_id = id
+  )
+}
+
+cna_test_oncokb <- function(path, alteration, value) {
+  template <- data.table::fread(system.file(
+    "extdata", "test_data", "oncotable_test_data", "oncokb_cna.txt", package = "Skilift"
+  ))
+  symbol <- if (alteration == "Amplification") "CDK6" else "CDKN2A"
+  row <- template[HUGO_SYMBOL == symbol & ALTERATION == alteration][1]
+  row[, `:=`(HUGO_SYMBOL = "GENE1", ALTERATION = alteration, min_cn = value)]
+  data.table::fwrite(row, path, sep = "\t")
+}
+
 test_that("process_gencode handles NULL input", {
   expect_error(process_gencode(NULL), "gencode file must be provided")
 })
@@ -121,18 +168,6 @@ test_that("collect_complex_events handles valid input", {
   expect_true(all(c("value", "type", "track", "source") %in% colnames(result_complex)))
 })
 
-test_that("collect_copy_number_jabba handles valid input", {
-  result_jabba <- suppressWarnings(collect_copy_number_jabba(
-    ot_test_paths$jabba_simple_gg,
-    gencode,
-    amp.thresh = 4,
-    del.thresh = 0.5,
-    verbose = FALSE,
-    karyograph = ot_test_paths$karyograph
-  ))
-  expect_true(nrow(result_jabba) > 0)
-  expect_true(all(c("value", "type", "track") %in% colnames(result_jabba)))
-})
 
 # not testing this function as signatures needs to be updated to use sigprofiler
 # test_that("collect_signatures handles valid input", {
@@ -283,25 +318,186 @@ test_that("collect_oncokb_cna handles missing file", {
   expect_equal(result$source, "oncokb_cna")
 })
 
-test_that("collect_oncokb_cna handles valid input", {
-  result <- collect_oncokb_cna(ot_test_paths$oncokb_cna, verbose = FALSE)
-  
-  # Check basic structure
-  expect_true(is.data.table(result))
-  expect_true(nrow(result) > 0)
-  
-  # Check required columns exist
-  expected_cols <- c("gene", "value", "type", "tier", "tier_description", 
-                    "therapeutics", "resistances", "diagnoses", "prognoses",
-                    "track", "source")
-  expect_true(all(expected_cols %in% names(result)))
-  
-  # Check values
-  expect_equal(result$track[1], "scna")
-  expect_equal(result$source[1], "oncokb_cna")
-  expect_true(all(result$tier %in% 1:3))
-  expect_true(all(result$tier_description %in% c("Clinically Actionable", "Clinically Significant", "VUS")))
-  expect_true(all(result$type %in% c("amp", "homdel", NA)))
+test_that("transcript CNA coverage selects CDS or exons per transcript", {
+  segments <- data.table::data.table(
+    seqnames = "1", start = 1L, end = 100L, gene_name = "GENE1", type = "amp"
+  )
+  gencode <- cna_test_ranges(
+    c(1, 1, 151, 1, 1, 1), c(100, 200, 200, 200, 200, 20),
+    c("CDS", "exon", "CDS", "exon", "exon", "exon"),
+    c("TX_CDS", "TX_CDS", "TX_CDS_MISS", "TX_CDS_MISS", "TX_EXON", "TX_SHORT")
+  )
+  detail <- get_transcript_cna_coverage(segments, gencode)
+  expect_identical(detail$transcript_id, c("TX_CDS", "TX_CDS_MISS", "TX_EXON", "TX_SHORT"))
+  expect_equal(detail$coverage_basis, c("CDS", "CDS", "exon", "exon"))
+  expect_equal(detail$feature_width, c(100, 50, 200, 20))
+  expect_equal(detail$overlapped_width, c(100, 0, 100, 20))
+  expect_equal(detail$coverage_fraction, c(1, 0, 0.5, 1))
+})
+
+test_that("transcript CNA coverage unions intervals without cross-gene leakage", {
+  segments <- data.table::data.table(
+    seqnames = "1", start = c(1L, 51L, 1L), end = c(75L, 100L, 150L),
+    gene_name = c("GENE1", "GENE1", "GENE2"), type = "amp", strand = "+"
+  )
+  gencode <- cna_test_ranges(
+    c(1, 1, 51, 101), c(100, 100, 150, 150), "CDS", "TX1",
+    gene_name = c("GENE1", "GENE1", "GENE1", "GENE2"), strand = "-"
+  )
+  detail <- get_transcript_cna_coverage(segments, gencode)
+  expect_equal(detail$gene_name, c("GENE1", "GENE2"))
+  expect_equal(detail$transcript_id, c("TX1", "TX1"))
+  expect_equal(detail$feature_width, c(150, 50))
+  expect_equal(detail$overlapped_width, c(100, 50))
+  expect_equal(detail$coverage_fraction, c(2 / 3, 1))
+  expect_equal(get_transcript_cna_coverage(segments[c(3, 1, 2)], gencode[c(4, 2, 3, 1)]), detail)
+})
+
+test_that("transcript CNA coverage handles unevaluable annotations", {
+  segments <- data.table::data.table(
+    seqnames = "1", start = 1L, end = 100L, gene_name = "GENE1", type = "amp"
+  )
+  empty <- get_transcript_cna_coverage(segments[0], NULL)
+  expect_equal(nrow(empty), 0L)
+  expect_identical(vapply(empty, typeof, ""), c(
+    gene_name = "character", type = "character", transcript_id = "character",
+    coverage_basis = "character", feature_width = "double",
+    overlapped_width = "double", coverage_fraction = "double"
+  ))
+  unnamed <- data.table::copy(segments)[, type := NA_character_]
+  expect_equal(get_transcript_cna_coverage(unnamed, NULL), empty)
+  gencode <- cna_test_ranges(1, 200, "transcript", "TX1")
+  expect_equal(get_transcript_cna_coverage(segments, gencode), empty)
+  gencode <- cna_test_ranges(151, 200, "CDS", "TX1")
+  expect_equal(get_transcript_cna_coverage(segments, gencode)$coverage_fraction, 0)
+  # A zero-width CDS union is unevaluable, not a reason to fall back to exons.
+  gencode <- cna_test_ranges(c(101, 1), c(100, 200), c("CDS", "exon"), "TX1")
+  expect_equal(get_transcript_cna_coverage(segments, gencode), empty)
+
+  gencode <- cna_test_ranges(1, 100, "CDS", "TX1")
+  gencode$transcript_id <- NULL
+  expect_error(get_transcript_cna_coverage(segments, gencode),
+    "^gencode must contain gene_name, type, and transcript_id metadata$")
+  for (bad_id in c("", NA_character_)) {
+    gencode <- cna_test_ranges(1, 100, "CDS", bad_id)
+    expect_error(get_transcript_cna_coverage(segments, gencode),
+      "^CDS/exon records must have non-empty gene_name and transcript_id$")
+  }
+  for (bad_gene in c("", NA_character_)) {
+    gencode <- cna_test_ranges(1, 100, "exon", "TX1", gene_name = bad_gene)
+    expect_error(get_transcript_cna_coverage(segments, gencode),
+      "^CDS/exon records must have non-empty gene_name and transcript_id$")
+  }
+  gencode <- cna_test_ranges(1, 100, "CDS", NA_character_, gene_name = "OTHER")
+  expect_equal(get_transcript_cna_coverage(segments, gencode), empty)
+
+  gencode <- cna_test_ranges(1, 1010, "gene")
+  graph <- cna_test_graph(c(1, 1001), c(1000, 1010), c(10, 2))
+  calls <- get_gene_ampdels_from_jabba(graph, gencode, nseg = NULL)
+  amp <- calls[gene_name == "GENE1" & type == "amp"]
+  expect_equal(nrow(amp), 1L)
+  expect_identical(amp$max_transcript_fraction, 0)
+  expect_equal(amp$transcript_coverage[[1]], empty[, .(
+    transcript_id, coverage_basis, feature_width, overlapped_width, coverage_fraction
+  )])
+})
+
+test_that("transcript CNA coverage gates AMP and HOMDEL by any transcript", {
+  oncokb_path <- tempfile(fileext = ".tsv")
+  withr::defer(unlink(oncokb_path))
+  check_case <- function(graph, gene, features, alteration, event_type, fraction, passes) {
+    gencode <- c(gene, features)
+    value <- if (event_type == "amp") 10 else 0
+    cna_test_oncokb(oncokb_path, alteration, value)
+    pge <- gencode[gencode$type == "gene"]
+    calls <- get_gene_ampdels_from_jabba(graph, pge, nseg = NULL)
+    event <- calls[gene_name == "GENE1" & type == event_type]
+    expect_equal(nrow(event), 1L)
+    expect_equal(event$max_transcript_fraction, fraction)
+    evidence <- event$transcript_coverage[[1]]
+    if (nrow(evidence) > 0L) {
+      expect_equal(max(evidence$coverage_fraction), event$max_transcript_fraction)
+    } else {
+      expect_equal(event$max_transcript_fraction, 0)
+    }
+    result <- collect_oncokb_cna(
+      oncokb_path, graph, pge, amp.thresh = 4, del.thresh = 0.5, karyograph = NULL
+    )
+    retained <- result[result$gene %in% "GENE1" & result$type %in% event_type]
+    expect_equal(nrow(retained), as.integer(passes))
+    if (passes) {
+      expect_equal(retained$value, value)
+      expect_equal(retained$source, "oncokb_cna")
+    }
+  }
+
+  amp_graph <- cna_test_graph(c(1, 1001), c(1000, 1010), c(10, 2))
+  amp_gene <- cna_test_ranges(1, 1010, "gene")
+  amp_fail <- cna_test_transcript("TX_FAIL", 1, 1010, 1001, 1010)
+  amp_pass <- cna_test_transcript("TX_PASS", 1, 1010, 910, 1009)
+  check_case(amp_graph, amp_gene, cna_test_transcript("TX90", 1, 1010, 911, 1010),
+    "Amplification", "amp", 0.90, FALSE)
+  check_case(amp_graph, amp_gene, amp_pass, "Amplification", "amp", 0.91, TRUE)
+  check_case(amp_graph, amp_gene, amp_fail, "Amplification", "amp", 0, FALSE)
+  check_case(amp_graph, amp_gene, c(amp_fail, amp_pass), "Amplification", "amp", 0.91, TRUE)
+  check_case(amp_graph, amp_gene, cna_test_transcript("TX_EXON", 910, 1009),
+    "Amplification", "amp", 0.91, TRUE)
+  check_case(amp_graph, amp_gene, amp_gene[0], "Amplification", "amp", 0, FALSE)
+
+  homdel_graph <- cna_test_graph(c(1, 11), c(10, 1000), c(0, 2))
+  homdel_gene <- cna_test_ranges(1, 1000, "gene")
+  homdel_fail <- cna_test_transcript("TX_FAIL", 1, 110, 11, 110)
+  check_case(homdel_graph, homdel_gene, homdel_fail, "Deletion", "homdel", 0, FALSE)
+  check_case(homdel_graph, homdel_gene, cna_test_transcript("TX_ONE", 1, 110, 10, 109),
+    "Deletion", "homdel", 0.01, TRUE)
+  check_case(homdel_graph, homdel_gene,
+    c(homdel_fail, cna_test_transcript("TX_PASS", 1, 10, 1, 10)),
+    "Deletion", "homdel", 1, TRUE)
+  check_case(homdel_graph, homdel_gene, cna_test_transcript("TX_EXON", 1, 10),
+    "Deletion", "homdel", 1, TRUE)
+  check_case(homdel_graph, homdel_gene, homdel_gene[0], "Deletion", "homdel", 0, FALSE)
+})
+
+test_that("transcript CNA coverage preserves gene-body nomination and raw calls", {
+  graph <- cna_test_graph(c(1, 101), c(100, 1000), c(10, 2))
+  gencode <- c(cna_test_ranges(1, 1000, "gene"), cna_test_transcript("TX1", 1, 100, 1, 100))
+  pge <- gencode[gencode$type == "gene"]
+  calls <- get_gene_ampdels_from_jabba(graph, pge, nseg = NULL)
+  expect_equal(nrow(calls[gene_name == "GENE1" & type == "amp"]), 0L)
+  oncokb_path <- tempfile(fileext = ".tsv")
+  withr::defer(unlink(oncokb_path))
+  cna_test_oncokb(oncokb_path, "Amplification", 10)
+  result <- collect_oncokb_cna(
+    oncokb_path, graph, pge, amp.thresh = 4, del.thresh = 0.5, karyograph = NULL
+  )
+  expect_equal(nrow(result[result$gene %in% "GENE1" & result$type %in% "amp"]), 0L)
+
+  graph <- cna_test_graph(c(1, 1001), c(1000, 1010), c(10, 2))
+  gencode <- c(cna_test_ranges(1, 1010, "gene"), cna_test_transcript("TX1", 1, 1010, 1001, 1010))
+  pge <- gencode[gencode$type == "gene"]
+  calls <- get_gene_ampdels_from_jabba(graph, pge, nseg = NULL)
+  expect_equal(nrow(calls), 1L)
+  amp <- calls[gene_name == "GENE1" & type == "amp"]
+  expect_equal(nrow(amp), 1L)
+  expect_equal(amp$min_cn, 10)
+  expect_equal(amp$min_quantile_cn, 10)
+  expect_equal(amp$max_cn, 10)
+  expect_equal(amp$total_node_width, 1000)
+  evidence <- amp$transcript_coverage[[1]]
+  expect_equal(evidence$coverage_basis, "CDS")
+  expect_equal(evidence$feature_width, 10)
+  expect_equal(evidence$overlapped_width, 0)
+  expect_equal(evidence$coverage_fraction, 0)
+  expect_equal(amp$max_transcript_fraction, max(evidence$coverage_fraction))
+  graph_path <- tempfile(fileext = ".rds")
+  withr::defer(unlink(graph_path))
+  saveRDS(graph, graph_path)
+  raw <- collect_copy_number_jabba(
+    graph_path, pge, amp.thresh = 4, del.thresh = 0.5, karyograph = NULL
+  )
+  raw_amp <- raw[gene == "GENE1" & type == "amp"]
+  expect_equal(nrow(raw_amp), 1L)
+  expect_equal(raw_amp$value, 10)
 })
 
 test_that("create_oncotable handles Cohort objects correctly", {

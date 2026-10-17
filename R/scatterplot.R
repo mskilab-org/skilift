@@ -15,6 +15,7 @@ color2numeric <- function(color) {
 #' @param ref Optional reference name. If not provided, the default reference is used.
 #' @return A data.table containing the sequence information for the specified reference.
 get_ref_metadata <- function(ref_seqinfo_json, ref = NULL) {
+    provenance_note(ref_seqinfo_json)
     meta <- jsonlite::read_json(ref_seqinfo_json)
 
     if (!("coordinates" %in% names(meta))) {
@@ -103,6 +104,7 @@ granges_to_arrow_scatterplot <- function(
     }
 
     message("Preparing GRanges for conversion to arrow format")
+    provenance_note(ref_seqinfo_json)
     dat <- gGnome::cov2cov.js(
         gr,
         meta.js = ref_seqinfo_json,
@@ -293,6 +295,7 @@ lift_denoised_coverage <- function(
     # Process each sample in parallel
     mclapply(seq_len(nrow(cohort$inputs)), function(i) {
         row <- cohort$inputs[i, ]
+        .provenance_context <- provenance_context(row, cohort)
         pair_dir <- file.path(output_data_dir, row$pair)
 
         if (!dir.exists(pair_dir)) {
@@ -331,6 +334,7 @@ lift_denoised_coverage <- function(
                     # Write arrow table
                     message(sprintf("Writing coverage arrow file for %s", row$pair))
                     arrow::write_feather(arrow_table, out_file, compression = "uncompressed")
+                    provenance_receipt(out_file)
                 } else {
                     warning(sprintf("Tumor coverage file missing for %s", row$pair))
                 }
@@ -374,6 +378,7 @@ lift_hetsnps <- function(cohort, output_data_dir, cores = 1) {
     # Process each sample in parallel
     mclapply(seq_len(nrow(cohort$inputs)), function(i) {
         row <- cohort$inputs[i, ]
+        .provenance_context <- provenance_context(row, cohort)
         pair_dir <- file.path(output_data_dir, row$pair)
 
         if (!dir.exists(pair_dir)) {
@@ -416,6 +421,7 @@ lift_hetsnps <- function(cohort, output_data_dir, cores = 1) {
                     # Write arrow table
                     message(sprintf("Writing hetsnps arrow file for %s", row$pair))
                     arrow::write_feather(arrow_table, out_file, compression = "uncompressed")
+                    provenance_receipt(out_file)
                 } else {
                     warning(sprintf("Het pileups file missing for %s", row$pair))
                 }

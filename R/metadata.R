@@ -477,6 +477,7 @@ process_qc_metrics <- function(
         is_invalid = is_character && (! nr == 1 )
         if (is_invalid) stop(path, ": invalid path!")
         if (!test_file_is_present(path)) return(data.table::data.table(pair = pair))
+        provenance_note(path)
         fcon = file(path, "r")
         txt = character(0)
         l = readLines(fcon, 1)
@@ -1717,10 +1718,10 @@ create_metadata <- function(
     }    
 
     # Add each component sequentially
-    metadata <- add_basic_metadata(metadata, tumor_type, tumor_details, disease, primary_site)
-    metadata <- add_sex_information(metadata, inferred_sex, jabba_gg, tumor_coverage)
+    metadata <- provenance_step(metadata, add_basic_metadata(metadata, tumor_type, tumor_details, disease, primary_site))
+    metadata <- provenance_step(metadata, add_sex_information(metadata, inferred_sex, jabba_gg, tumor_coverage))
     # Add coverage metrics
-    metadata <- add_coverage_metrics(
+    metadata <- provenance_step(metadata, add_coverage_metrics(
         metadata = metadata,
         tumor_coverage = tumor_coverage,
         foreground_col_name = foreground_col_name,
@@ -1730,10 +1731,11 @@ create_metadata <- function(
         tumor_wgs_metrics = tumor_wgs_metrics,
         normal_wgs_metrics = normal_wgs_metrics
     )
-    metadata <- add_variant_counts(metadata, somatic_snvs, genome)
+    )
+    metadata <- provenance_step(metadata, add_variant_counts(metadata, somatic_snvs, genome))
     
     # New SV-related function calls
-    metadata <- add_sv_counts(metadata, jabba_gg)
+    metadata <- provenance_step(metadata, add_sv_counts(metadata, jabba_gg))
     # Add purity and ploidy — use direct values if provided, otherwise derive from purple/jabba
     if (!is.null(purity) && !is.null(ploidy)) {
         purity_numeric = as.numeric(purity)
@@ -1750,51 +1752,53 @@ create_metadata <- function(
         ploidy = ploidy_numeric
         metadata$purity <- purity
         metadata$ploidy <- ploidy
+        provenance_literal("purity", purity)
+        provenance_literal("ploidy", ploidy)
         metadata$beta <- purity / (purity * ploidy + 2 * (1 - purity))
         metadata$gamma <- 2 * (1 - purity) / (purity * ploidy + 2 * (1 - purity))
     } else {
-        metadata <- add_purity_ploidy(metadata, purple_pp_bestFit = purple_pp_bestFit, jabba_gg = jabba_gg, tumor_coverage = tumor_coverage)
+        metadata <- provenance_step(metadata, add_purity_ploidy(metadata, purple_pp_bestFit = purple_pp_bestFit, jabba_gg = jabba_gg, tumor_coverage = tumor_coverage))
     }
     # metadata <- add_loh(metadata, jabba_gg, seqnames_loh)
-    metadata <- add_fga(metadata, jabba_gg, seqnames_autosomes)
-    metadata <- add_genome_length(metadata, jabba_gg, seqnames_genome_width_or_genome_length)
-    metadata <- add_sv_types(metadata, jabba_gg, events)
-    metadata <- add_coverage_parameters(metadata, tumor_coverage, denoised_coverage_field)
-    metadata <- add_het_pileups_parameters(metadata, het_pileups)
+    metadata <- provenance_step(metadata, add_fga(metadata, jabba_gg, seqnames_autosomes))
+    metadata <- provenance_step(metadata, add_genome_length(metadata, jabba_gg, seqnames_genome_width_or_genome_length))
+    metadata <- provenance_step(metadata, add_sv_types(metadata, jabba_gg, events))
+    metadata <- provenance_step(metadata, add_coverage_parameters(metadata, tumor_coverage, denoised_coverage_field), c("purity", "ploidy"))
+    metadata <- provenance_step(metadata, add_het_pileups_parameters(metadata, het_pileups), c("purity", "ploidy"))
     
     # Add TMB calculation
     if (!cohort_type == "heme")
-        metadata <- add_tmb(metadata, somatic_snvs, jabba_gg, genome, seqnames_genome_width_or_genome_length)
+        metadata <- provenance_step(metadata, add_tmb(metadata, somatic_snvs, jabba_gg, genome, seqnames_genome_width_or_genome_length), c("snv_count", "total_genome_length"))
     
-    metadata <- add_signatures(
+    metadata <- provenance_step(metadata, add_signatures(
         metadata,
         activities_sbs_signatures,
         activities_indel_signatures,
         deconstructsigs_sbs_signatures
-    )
+    ))
 
-    metadata = add_signature_cosine_similarity(
+    metadata = provenance_step(metadata, add_signature_cosine_similarity(
         metadata,
         channel_counts = matrix_sbs_signatures,
         decomposed_signature_matrix = decomposed_sbs_signatures,
         signature_reference_matrix = activities_sbs_signatures, ## FIXME: path is found through dirname search.. should be able to provide just a matrix to get the reference signatures
         field = "sigprofiler_sbs_cosine_similarity"
-    )
+    ))
 
-    metadata = add_signature_cosine_similarity(
+    metadata = provenance_step(metadata, add_signature_cosine_similarity(
         metadata,
         channel_counts = matrix_indel_signatures,
         decomposed_signature_matrix = decomposed_indel_signatures,
         signature_reference_matrix = activities_indel_signatures, ## FIXME: path is found through dirname search.. should be able to provide just a matrix to get the reference signatures
         field = "sigprofiler_indel_cosine_similarity"
-    )
+    ))
 
     # Add HRD scores
-    metadata <- add_hrd_scores(metadata, hrdetect, onenesstwoness)
+    metadata <- provenance_step(metadata, add_hrd_scores(metadata, hrdetect, onenesstwoness))
 
     # Add MSIsensor score
-    metadata <- add_msisensor_score(metadata, msisensorpro)
-    metadata <- add_conpair(metadata = metadata, conpair_contamination = conpair_contamination, conpair_concordance = conpair_concordance)
+    metadata <- provenance_step(metadata, add_msisensor_score(metadata, msisensorpro))
+    metadata <- provenance_step(metadata, add_conpair(metadata = metadata, conpair_contamination = conpair_contamination, conpair_concordance = conpair_concordance))
 
     if (!as.logical(is_visible)) {
         metadata$visible <- FALSE
@@ -1810,6 +1814,7 @@ create_metadata <- function(
         fnm = names(field)
         value = field[[1]]
         metadata[[fnm]] = value
+        provenance_literal(fnm, value, "added-field-override")
     }
     
     return(metadata)
@@ -1883,6 +1888,7 @@ lift_metadata <- function(
         X = seq_len(nrow(lift_inputs)), 
         FUN = function(i) {
             row <- lift_inputs[i,]
+            .provenance_context <- provenance_context(row, cohort)
             pair_dir <- file.path(output_data_dir, row$pair)
             
             if (!dir.exists(pair_dir)) {
@@ -1981,7 +1987,7 @@ lift_metadata <- function(
                 }
                 
                 # Write to JSON
-                jsonlite::write_json(
+                provenance_write_json(
                   metadata,
                   out_file,
                   auto_unbox = TRUE,
@@ -2025,6 +2031,7 @@ lift_metadata <- function(
 #' @return None
 #' @export
 lift_datafiles_json <- function(output_data_dir, cores = 1) {
+  provenance_finalize(output_data_dir)
   if (!dir.exists(output_data_dir)) {
     stop("Data directory does not exist.")
   }
@@ -2057,7 +2064,9 @@ lift_datafiles_json <- function(output_data_dir, cores = 1) {
     X = metadata_files, 
     FUN = function(file) {
         main = function() {
-            unbox(jsonlite::fromJSON(file))
+            records <- jsonlite::read_json(file, simplifyVector = FALSE)
+            if (length(records) != 1L || is.null(records[[1]]$pair)) stop("Expected one sample metadata record")
+            records[[1]]
         }
         tryCatchLog(
             main(), 
@@ -2072,7 +2081,7 @@ lift_datafiles_json <- function(output_data_dir, cores = 1) {
 
   # Write the combined JSON list to "datafiles.json" in the data directory
   output_file <- file.path(output_data_dir, "datafiles.json")
-  jsonlite::write_json(combined_data, output_file, auto_unbox = TRUE, pretty = TRUE, null = "null")
+  provenance_atomic_json(Filter(Negate(is.null), combined_data), output_file)
 
   invisible(convert_json_to_arrow(output_file))
   
@@ -2185,6 +2194,15 @@ convert_json_to_arrow <- function(json_file_path, arrow_file_path = NULL) {
   })
   
   # Ensure data is a data.frame
+  # Provenance has heterogeneous, nested artifacts. Encode it as JSON in one
+  # Arrow string column; JSON manifests retain the native object representation.
+  raw_records <- jsonlite::read_json(json_file_path, simplifyVector = FALSE)
+  if (any(vapply(raw_records, function(record) !is.null(record$provenance), logical(1)))) {
+    data$provenance <- vapply(raw_records, function(record) {
+      if (is.null(record$provenance)) return(NA_character_)
+      as.character(jsonlite::toJSON(record$provenance, auto_unbox = TRUE, null = "null", digits = NA))
+    }, character(1))
+  }
   if (!is.data.frame(data)) {
     tryCatch({
       data <- as.data.frame(data)

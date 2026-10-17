@@ -214,6 +214,7 @@ lift_variant_qc <- function(cohort, output_data_dir, cores = 1) {
     # Process each sample in parallel
     iterate_fun = function(i) {
         row <- cohort$inputs[i,]
+        .provenance_context <- provenance_context(row, cohort)
         pair_dir <- file.path(output_data_dir, row$pair)
         
         if (!dir.exists(pair_dir)) {
@@ -233,7 +234,7 @@ lift_variant_qc <- function(cohort, output_data_dir, cores = 1) {
             cohort_type = cohort$type
             )
             # Write to JSON
-            jsonlite::write_json(qc_data, out_file, pretty = TRUE)
+            provenance_write_json(qc_data, out_file, pretty = TRUE)
         }, error = function(e) {
             print(sprintf("Error processing %s: %s", row$pair, e$message))
         })

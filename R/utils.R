@@ -1548,7 +1548,7 @@ load_segmentation_any <- function(seg_path) {
 
   text_try <- tryCatch(
     {
-      seg_dt <- data.table::fread(seg_path)
+      seg_dt <- fread(seg_path)
       list(
         seg_gr = gUtils::dt2gr(seg_dt),
         pp_source = NULL,
