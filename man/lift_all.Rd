@@ -11,7 +11,8 @@ lift_all(
   genome_length = NULL,
   width = 10000,
   gencode = Skilift::get_default_gencode(),
-  ...
+  ...,
+  use_provenance_table = FALSE
 )
 }
 \arguments{
@@ -23,6 +24,9 @@ lift_all(
 
 \item{...}{Additional arguments. Use \code{symlink = TRUE} to create absolute
 BAM/index symlinks to the original files instead of the default hardlinks.}
+
+\item{use_provenance_table}{Use separate hash-validated provenance tables instead
+of the legacy oncotable cache. Defaults to FALSE; existing callers are unchanged.}
 }
 \value{
 None

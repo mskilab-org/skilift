@@ -43,6 +43,18 @@ has_required_columns <- function(cohort, columns, any = FALSE, verbose = TRUE) {
       "oncokb_cna",
       "oncokb_fusions"
     ),
+    provenance_table = c(
+      "somatic_variant_annotations",
+      "fusions",
+      "jabba_gg",
+      "karyograph",
+      "events",
+      "signature_counts",
+      "oncokb_snv",
+      "oncokb_cna",
+      "oncokb_fusions"
+    ),
+    filtered_events_from_tables = c("provenance_table_root"),
     filtered_events = c("oncotable", "jabba_gg"),
     aggregated_events = "aggregated_events",
     highlighted_events = "highlighted_events",
@@ -126,6 +138,8 @@ has_required_columns <- function(cohort, columns, any = FALSE, verbose = TRUE) {
 #' @param cohort Cohort object containing sample information
 #' @param output_data_dir Base directory for output files
 #' @param cores Number of cores for parallel processing (default: 1)
+#' @param use_provenance_table Opt in to a hash-validated provenance-table cache
+#'   instead of the legacy oncotable path. Defaults to FALSE.
 #' @param ... Additional arguments. Use \code{symlink = TRUE} to create absolute
 #'   BAM/index symlinks to the original files instead of the default hardlinks.
 #'
@@ -138,7 +152,8 @@ lift_all <- function(
     genome_length = NULL,
     width = 10000,
     gencode = Skilift::get_default_gencode(),
-    ...) {
+    ...,
+    use_provenance_table = FALSE) {
   
   list2env(list(...), envir = environment())
 
@@ -154,10 +169,16 @@ lift_all <- function(
     dir.create(output_data_dir, recursive = TRUE)
   }
 
-  cohort <- provenance_begin_upload(cohort, output_data_dir,
-    arguments = c(list(cores = cores, genome_length = genome_length, width = width, gencode = gencode), list(...)))
+  upload_arguments <- c(list(cores = cores, genome_length = genome_length, width = width, gencode = gencode), list(...))
+  if (isTRUE(use_provenance_table)) upload_arguments$use_provenance_table <- TRUE
+  cohort <- provenance_begin_upload(cohort, output_data_dir, arguments = upload_arguments)
 
-  if (!is.null(cohort$nextflow_results_path)) {
+  if (isTRUE(use_provenance_table)) {
+    provenance_table_root <- file.path(
+      if (!is.null(cohort$nextflow_results_path)) cohort$nextflow_results_path else output_data_dir,
+      "provenance")
+    message("Provenance tables will be placed in: ", provenance_table_root)
+  } else if (!is.null(cohort$nextflow_results_path)) {
     oncotable_dir <- file.path(cohort$nextflow_results_path, "oncotable")
   } else {
     oncotable_dir <- file.path(output_data_dir, "oncotable")
@@ -167,7 +188,29 @@ lift_all <- function(
 
   message("Uploading in ", cohort$type, " mode")
 
-  if (cohort$type == "paired") {
+  if (isTRUE(use_provenance_table)) {
+    cohort_mod <- lift_mvp_provenance(
+      cohort = cohort,
+      output_data_dir = output_data_dir,
+      provenance_table_root = provenance_table_root,
+      cores = cores,
+      genome_length = genome_length,
+      width = width,
+      gencode = gencode,
+      ... = ...
+    )
+    if (cohort$type == "paired" && has_required_columns(cohort_mod, required_columns$germline_multiplicity)) {
+      Skilift::skimessage("Uploading germline multiplicity via Skilift::lift_multiplicity()")
+      Skilift::shutup({
+        lift_multiplicity(
+          cohort = cohort_mod,
+          output_data_dir = output_data_dir,
+          cores = cores,
+          is_germline = TRUE
+        )
+      })
+    }
+  } else if (cohort$type == "paired") {
     cohort_mod = lift_paired(
       cohort = cohort,
       output_data_dir = output_data_dir,
@@ -312,6 +355,271 @@ lift_mvp <- function(
     
   # } else if (has_required_columns(cohort, required_columns$filtered_events)) {
   #   Skilift::skimessage("Uploading filtered events table via Skilift::lift_filtered_events()")
+  #   Skilift::shutup({
+  #     cohort <- lift_filtered_events(
+  #       cohort = cohort,
+  #       output_data_dir = output_data_dir,
+  #       cores = cores
+  #     )
+  #   })
+  # } 
+
+  if (has_required_columns(cohort, required_columns$signatures)) {
+    Skilift::skimessage("Uploading signatures via Skilift::lift_signatures()")
+    Skilift::shutup({
+      lift_signatures(
+        cohort = cohort,
+        output_data_dir = output_data_dir,
+        cores = cores
+      )
+    })
+  }
+
+  if (has_required_columns(cohort, required_columns$multiplicity)) {
+    Skilift::skimessage("Uploading somatic multiplicity via Skilift::lift_multiplicity()")
+    Skilift::shutup({
+      lift_multiplicity(
+        cohort = cohort,
+        output_data_dir = output_data_dir,
+        cores = cores
+      )
+    })
+  }
+
+  if (has_required_columns(cohort, required_columns$segment_width)) {
+    Skilift::skimessage("Uploading purity ploidy fit histogram via Skilift::lift_segment_width_distribution()")
+    Skilift::shutup({
+      lift_segment_width_distribution(
+        cohort = cohort,
+        output_data_dir = output_data_dir,
+        cores = cores
+      )
+    })
+  }
+
+  if (has_required_columns(cohort, required_columns$variant_qc)) {
+    Skilift::skimessage("Uploading Variant QC via Skilift::lift_variant_qc()")
+    Skilift::shutup({
+      lift_variant_qc(
+        cohort = cohort,
+        output_data_dir = output_data_dir,
+        cores = cores
+      )
+    })
+  }
+
+  if (has_required_columns(cohort, Skilift:::required_columns$metadata, any = TRUE)) {
+    Skilift::skimessage("Uploading metadata (tumor type, coverage, other QC, HRD score, MSI score, etc) for available fields via Skilift::lift_metadata()")
+    Skilift::shutup({
+      cohort_meta = lift_metadata(
+        cohort = Skilift::copy(cohort),
+        output_data_dir = output_data_dir,
+        cores = cores,
+        genome_length = genome_length
+      )
+    })
+
+    Skilift::skimessage("Generating datafiles.json via Skilift::lift_datafiles_json()")
+    Skilift::shutup({
+      lift_datafiles_json(
+        output_data_dir = output_data_dir
+      )
+    })
+  }
+
+  # if (has_required_columns(cohort, required_columns$pp_plot)) {
+  #   Skilift::skimessage("Uploading  via Skilift::lift_datafiles_json()")
+  #   Skilift::shutup({
+  #     lift_pp_plot(
+  #       cohort = cohort,
+  #       output_data_dir = output_data_dir
+  #     )
+  #   })
+  # }
+
+  if (has_required_columns(cohort, Skilift:::required_columns$bam, any = TRUE)) {
+    
+    Skilift::skimessage("Linking BAMs to data directory via Skilift::lift_bam()")
+    Skilift::shutup({
+      lift_bam(
+        cohort = cohort,
+        output_data_dir = output_data_dir,
+        cores = cores,
+        symlink = symlink
+      )
+    })
+  }
+
+  if (has_required_columns(cohort, Skilift:::required_columns$multiplicity_fits, any = TRUE)) {
+    Skilift::skimessage("Uploading multiplicity fit histograms via Skilift::lift_multiplicity_fits()")
+    Skilift::shutup({
+      lift_multiplicity_fits(
+        cohort,
+        output_data_dir = output_data_dir,
+        cores = cores
+      )
+    })
+  }
+
+  if (has_required_columns(cohort, Skilift:::required_columns$coverage_jabba_cn)) {
+    Skilift::skimessage("Uploading multiplicity coverage vs copy number scatter+boxplot via Skilift::lift_coverage_jabba_cn()")
+    Skilift::shutup({
+      lift_coverage_jabba_cn(
+        cohort,
+        output_data_dir = output_data_dir,
+        cores = cores,
+        width = width
+      )
+    })
+  }
+
+  if (has_required_columns(cohort, required_columns$twod_purity_ploidy)) {
+    Skilift::skimessage("Uploading 2D purity ploidy plot via Skilift::lift_2d_purity_ploidy_plot()")
+    Skilift::shutup({
+      sinkvar = lift_2d_purity_ploidy_plot(
+        cohort = cohort,
+        output_data_dir = output_data_dir,
+        cores = cores
+      )
+    })
+  }
+
+  if (has_required_columns(cohort, Skilift:::required_columns$purple_sunrise_plot)) {
+    Skilift::skimessage("Uploading sunrise plot via Skilift::lift_purple_sunrise_plot()")
+    Skilift::shutup({
+      lift_purple_sunrise_plot(
+        cohort,
+        output_data_dir = output_data_dir,
+        cores = cores
+      )
+    })
+  }
+
+  if (has_required_columns(cohort, required_columns$allelic_pp_fit)) {
+    Skilift::skimessage("Uploading Zi-Ning (Allelic purity ploidy fit) plot via Skilift::lift_allelic_pp_fit()")
+    submain = function() {
+      Skilift::shutup({
+        lift_allelic_pp_fit(
+          cohort = cohort,
+          output_data_dir = output_data_dir,
+          cores = cores
+        )
+      })
+
+    }
+    capture.output({sinkvar = submain()}, type = "output")
+  }
+
+  return(cohort)
+
+  
+}
+
+#' Lift common tracks using the additive provenance-table cache
+#'
+#' Unlike the four-stage pipeline, lift_all has no curation step and consumes its
+#' newly collected tables directly. All other track lifters retain their behavior.
+#' Annotation-only cohorts do not require a JaBbA graph column to collect or lift
+#' variant tables; graph-dependent track lifters retain their existing gates.
+#' @inheritParams lift_mvp
+#' @param provenance_table_root Directory for collected provenance tables.
+#' @param sources_for Optional function(row) returning annotation sources.
+#' @param fields Declarative annotation fields and transforms.
+#' @param additional_columns Filtered-events JSON column specification.
+#' @param provenance_stage Stage to consume, normally collected for this wrapper.
+#' @return The updated cohort.
+#' @export
+lift_mvp_provenance <- function(
+  cohort,
+  output_data_dir,
+  provenance_table_root,
+  cores,
+  genome_length = c(1:22, "X", "Y"),
+  symlink = FALSE,
+  sources_for = NULL,
+  fields = list(),
+  additional_columns = Skilift:::default_echtvar_json_fields,
+  provenance_stage = "collected",
+  ...
+) {
+  list2env(list(...), envir = environment())
+
+  if (has_required_columns(cohort, required_columns$total_copy_number_graph)) {
+    Skilift::skimessage("Uploading total copy number segment gGraph via Skilift::lift_copy_number_graph()")
+    Skilift::shutup({
+        lift_copy_number_graph(
+          cohort = cohort,
+          output_data_dir = output_data_dir,
+          cores = cores,
+          is_allelic = FALSE
+        )
+    })
+  }
+
+  if (has_required_columns(cohort, required_columns$allelic_copy_number_graph)) {
+    Skilift::skimessage("Uploading allelic copy number segment gGraph via Skilift::lift_copy_number_graph()")
+    Skilift::shutup({
+      lift_copy_number_graph(
+        cohort = cohort,
+        output_data_dir = output_data_dir,
+        cores = cores,
+        is_allelic = TRUE
+      )
+    })
+  }
+
+  if (has_required_columns(cohort, required_columns$denoised_coverage)) {
+    Skilift::skimessage("Uploading binned coverage via Skilift::lift_denoised_coverage()")
+    Skilift::shutup({
+      lift_denoised_coverage(
+        cohort = cohort,
+        output_data_dir = output_data_dir,
+        cores = cores
+      )
+    })
+  }
+
+  if (has_required_columns(cohort, required_columns$hetsnps)) {
+    Skilift::skimessage("Uploading hetsnp pileup via Skilift::lift_hetsnps()")
+    Skilift::shutup({
+      lift_hetsnps(
+        cohort = cohort,
+        output_data_dir = output_data_dir,
+        cores = cores
+      )
+    })
+  }
+
+  if (has_required_columns(cohort, required_columns$provenance_table, any = TRUE)) {
+    Skilift::skimessage("Creating cached provenance tables via Skilift::lift_provenance_tables()")
+    Skilift::shutup({
+      cohort <- lift_provenance_tables(
+        cohort = cohort,
+        root = provenance_table_root,
+        cores = cores,
+        gencode = gencode,
+        sources_for = sources_for,
+        fields = fields
+      )
+    })
+  }
+
+  if (has_required_columns(cohort, required_columns$filtered_events_from_tables)) {
+    Skilift::skimessage("Uploading filtered events table via Skilift::lift_filtered_events_from_tables()")
+    Skilift::shutup({
+      cohort <- lift_filtered_events_from_tables(
+        cohort = cohort,
+        output_data_dir = output_data_dir,
+        cores = cores,
+        additional_columns = additional_columns,
+        provenance_stage = provenance_stage
+      )
+    })
+  }
+
+    
+  # } else if (has_required_columns(cohort, required_columns$filtered_events_from_tables)) {
+  #   Skilift::skimessage("Uploading filtered events table via Skilift::lift_filtered_events_from_tables()")
   #   Skilift::shutup({
   #     cohort <- lift_filtered_events(
   #       cohort = cohort,

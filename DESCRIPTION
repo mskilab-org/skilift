@@ -22,6 +22,8 @@ Imports:
     data.table (>= 1.10), 
     R6,
     jsonlite,
+    arrow,
+    digest,
     gGnome,
     gUtils,
     ggplot2,
@@ -61,6 +63,7 @@ StagedInstall: no
 LinkingTo: Rcpp
 Suggests:
     testthat (>= 2.0),
+    withr,
     covr,
     pkgdown,
     knitr,

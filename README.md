@@ -155,6 +155,170 @@ the cohort for that plot type. The lifter methods can be run in parallel, and
 the number of cores can be specified by setting the `cores` parameter. By
 default, the lifter methods will use 1 core.
 
+## Cached provenance tables (opt-in)
+
+The provenance-table path is additive. Existing `oncotable()`,
+`create_oncotable()`, `create_filtered_events()` and `lift_filtered_events()`
+remain available with their existing behavior. `lift_all()` defaults to
+`use_provenance_table = FALSE`; opt in explicitly:
+
+```r
+cohort <- lift_all(cohort, output_data_dir = "build/data", cores = 1,
+                   use_provenance_table = TRUE)
+```
+
+This chooses `lift_mvp_provenance()`, which collects tables and consumes
+the **collected** stage directly. It does not invent a curation step.
+Its cache root is `<nextflow_results_path>/provenance` when available,
+otherwise `<output_data_dir>/provenance`. For explicit cache location or
+application-specific collection/curation boundaries, use the APIs below.
+Annotation-only cohorts do not need a JaBbA graph; graph-dependent tracks
+retain their own input requirements.
+
+### Allele-keyed annotation projection
+
+Declare an extra field once, then reuse it for table projection and the
+filtered-events `additional_columns` interface:
+
+```r
+fields <- list(annotation_field(
+  source = "review_score", as = "review_score",
+  json = "review_confidence", title = "Review confidence", format = ".2%"
+))
+
+target <- data.table::data.table(
+  Chromosome = "1", vcf_pos = 100L, vcf_ref = "A", vcf_alt = "T"
+)
+source <- data.table::data.table(
+  Chromosome = "1", vcf_pos = 100L, vcf_ref = "A", vcf_alt = "T",
+  review_score = 0.95
+)
+annotated <- merge_annotations_by_allele(target, source, fields)
+json_columns <- annotation_json_columns(fields)
+```
+
+`source` names the incoming column; `as` names its table column; `json`
+names the output field/column ID. The JSON spec's `dataIndex` reads `as`.
+Optional `transform` is applied to projected values; `title` and `format`
+control presentation. Fields without `json` remain table-only.
+`annotation_json_columns()` includes the default echtvar columns unless
+its `base` argument is overridden.
+
+- `allele_key()` defaults to chromosome, **1-based VCF position**, REF and
+  ALT. When REF/ALT are absent it uses the existing MAF reconstruction
+  (including indel anchor-base conventions); callers must still supply
+  chromosome/position and the required MAF fields. It does not reinterpret
+  arbitrary coordinates or genome builds.
+- Default matching uses the first source row for a duplicate key.
+  `overwrite = FALSE` fills only missing target values; TRUE replaces them.
+  Missing source fields emit a message and yield missing projected values.
+  Explicit `target_key` / `source_key` support non-coordinate keys, such as
+  fusion identifiers. `direction = "source_into_matched_target"` assigns
+  into the first matching target row, with the last source assignment winning.
+- `fallback = "oncokb_multiplicity"` delegates pairing to the existing
+  `merge_oncokb_multiplicity()` geometry cascade before projecting fields:
+  exact allele, gene/ALT overlap, adjusted indels and the existing gene/
+  interval fallbacks are preserved, not replaced by a new matching rule.
+  Unlike default projection, fallback mode leaves source-absent fields
+  absent, preserving collector derivation such as VAF from allele counts
+  when the multiplicity input does not supply a VAF column.
+
+`collect_oncokb_with_sources()` accepts extra sources as
+`list(table = <table or path>, fields = <field list>, key = NULL,
+overwrite = FALSE)`. RDS paths use `readRDS`; other tabular paths use
+`fread`. `lift_provenance_tables()` accepts `sources_for = function(row)`
+to supply these per case, and `fields` for post-collection transforms.
+For example, with one allele-keyed review TSV per pair:
+
+```r
+cache_root <- "build/provenance"
+cohort <- lift_provenance_tables(
+  cohort, root = cache_root, cores = 1,
+  sources_for = function(row) list(list(
+    table = file.path("review", paste0(row$pair, ".tsv")),
+    fields = fields, overwrite = TRUE
+  ))
+)
+cohort <- lift_filtered_events_from_tables(
+  cohort, output_data_dir = "build/data", cores = 1,
+  provenance_stage = "collected", additional_columns = json_columns
+)
+```
+
+### Two-stage cache and integrity
+
+The explicit stage names are `collected` and `curated`. For split workflows,
+read with `read_provenance_table(root, pair, stage = "collected")`, apply
+the application's curation, then write that result with
+`write_provenance_table(table, root, pair, stage = "curated", inputs = ...,
+parameters = ...)`. The two stages occupy **separate files**; writing
+curated preserves the collected artifact and manifest entry. Rerunning a
+stage replaces that stage, not an append-only history. Do not run competing
+writers for the same pair/stage.
+
+`create_provenance_table()` collects a single case; the cohort producer
+`lift_provenance_tables()` adds `provenance_table_root` and `provenance_table`
+to cohort inputs. Both `create_filtered_events_from_table()` and
+`lift_filtered_events_from_tables()` default to consuming **curated**;
+set `provenance_stage = "collected"` explicitly when no curation is needed.
+
+Each pair directory contains stage tables and `manifest.json`. The manifest
+records format/path, row count, columns, SHA-256, production time, input
+hashes and parameters. Normal tables use parquet, preserving column types
+and interpretation strings with embedded quotes/newlines. Tables containing
+list columns use RDS automatically; `options(skilift_provenance_format =
+"rds")` explicitly selects RDS. The manifest, not a guessed extension,
+determines reader dispatch. `provenance_table_paths()` returns conventional
+parquet paths; `write_provenance_table()` invisibly returns the actual path.
+
+`read_provenance_table()` returns a data.table and verifies a manifest's
+recorded SHA-256. Altered bytes raise `provenance_table_hash_mismatch` with
+pair, stage and both hashes. Restore/rebuild the intended cache rather than
+editing its digest. Without a manifest the reader can resolve conventional
+filenames, but there is no recorded hash to check. Input receipts join the
+active provenance lineage. Hash validation is **not** automatic invalidation
+when upstream inputs or curation parameters change; rerun the owning stage.
+
+### Generic QC premerge and metadata ingest
+
+QC sources are merged before metadata lift, not patched into emitted JSON.
+A plugin declares its source keys, normalization and units with `qc_source()`
+and `annotation_field()`; the generic API handles JSON, CSV and Picard input:
+
+```r
+qc_fields <- list(annotation_field("depth", as = "mean_depth",
+                                   transform = as.numeric))
+sources <- list(
+  qc_source("primary_qc.csv", sample_key = "sample", fields = qc_fields,
+            kind = "csv", precedence = "overwrite"),
+  qc_source("fallback_qc.csv", sample_key = "sample", fields = qc_fields,
+            kind = "csv", precedence = "fill")
+)
+merge_qc_sources(sources, out_path = "build/qc_merged.json",
+                 field_order = "mean_depth")
+
+cohort$inputs$qc_merged <- "build/qc_merged.json"
+cohort$inputs$qc_sample_key <- cohort$inputs$pair
+lift_metadata(cohort, output_data_dir = "build/data", cores = 1)
+```
+
+`sample_key` is a CSV/Picard column or a JSON name path resolving to the
+sample ID. Optional `locate(object, key)` selects/transforms the record
+(return NULL to skip); `key_transform(key)` normalizes the output ID.
+Tabular input is read as character, so declare numeric/unit transforms.
+Blank/`none` sample keys are skipped. Within a source's path list the last
+record for a key wins; sources are then applied in list order with
+overwrite/fill precedence. `merge_qc_sources()` requires `field_order` for
+stable key order and accepts named `derived` functions of the merged record.
+
+`add_coverage_metrics_from_qc_file(metadata, qc_merged, sample_key)` ingests
+the record as `coverage_qc` (without a `pair` member), and uses `mean_depth`
+for `tumor_median_coverage` by default. `lift_metadata()` consumes cohort
+`qc_merged` / `qc_sample_key` columns before QC flags are evaluated; omitting
+merged QC retains the legacy path. Set an explicit key for generic cohorts.
+The Myeloseqer pipeline's `lib/mys_qc_plugin.R` is an application plugin
+for IR/API, BAM and PDF precedence, not a universal metric mapping.
+
 # Usage with PGV
 The Skilift class manages a database of patient metadata and genomic plot data. It provides an interface to load, update, query, and manipulate the datafiles.json of PGV programmatically. This object is only necessary if you want to push data to PGV.
 

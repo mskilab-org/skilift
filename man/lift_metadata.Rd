@@ -15,7 +15,10 @@ lift_metadata(
 )
 }
 \arguments{
-\item{cohort}{Cohort object containing sample information}
+\item{cohort}{Cohort object containing sample information. Optional
+\code{qc_merged} input paths supply merged coverage records before QC flags.
+\code{qc_sample_key} selects a record; otherwise the DNA key is derived from
+\code{ir_analysis_id}, falling back to \code{pair}.}
 
 \item{output_data_dir}{Base directory for output files}
 

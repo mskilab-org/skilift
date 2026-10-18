@@ -47,11 +47,18 @@ create_metadata(
   conpair_concordance = NULL,
   cohort_type = NULL,
   qc_flags_config = NULL,
-  added_field_values = NULL
+  added_field_values = NULL,
+  qc_merged = NULL,
+  qc_sample_key = pair
 )
 }
 \arguments{
 \item{pair}{The sample pair identifier.}
+
+\item{qc_merged}{Optional JSON file produced by \code{merge_qc_sources}; ingested
+before QC flags are evaluated. Existing behavior is unchanged when absent.}
+
+\item{qc_sample_key}{Record key in the merged QC file, defaulting to \code{pair}.}
 
 \item{tumor_type}{The type of tumor.}
 

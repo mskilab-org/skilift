@@ -1660,6 +1660,9 @@ add_msisensor_score <- function(metadata, msisensorpro) {
 #' @param genome The genome reference used.
 #' @param seqnames_loh Sequence names for loss of heterozygosity.
 #' @param seqnames_genome_width_or_genome_length Sequence names and genome width in list or genome length as a numeric
+#' @param qc_merged Optional path to sample-keyed merged QC JSON. When omitted,
+#'   legacy metadata behavior is unchanged.
+#' @param qc_sample_key Record key in qc_merged; defaults to pair.
 #' @return A data.table containing the metadata for a single sample pair.
 #' @export
 create_metadata <- function(
@@ -1705,7 +1708,9 @@ create_metadata <- function(
     conpair_concordance = NULL,
     cohort_type = NULL,
     qc_flags_config = NULL,
-    added_field_values = NULL
+    added_field_values = NULL,
+    qc_merged = NULL,
+    qc_sample_key = pair
 ) {
     # Initialize metadata with all possible columns
     metadata <- initialize_metadata_columns(pair)
@@ -1732,6 +1737,11 @@ create_metadata <- function(
         normal_wgs_metrics = normal_wgs_metrics
     )
     )
+    if (!is.null(qc_merged) && length(qc_merged) == 1L && !is.na(qc_merged) && nzchar(qc_merged)) {
+        metadata <- provenance_step(metadata, add_coverage_metrics_from_qc_file(
+            metadata, qc_merged = qc_merged, sample_key = qc_sample_key
+        ))
+    }
     metadata <- provenance_step(metadata, add_variant_counts(metadata, somatic_snvs, genome))
     
     # New SV-related function calls
@@ -1804,7 +1814,14 @@ create_metadata <- function(
         metadata$visible <- FALSE
     }
 
-    metadata = process_qc_flag(metadata, qc_flags_config)
+    if (!is.null(qc_merged) && length(qc_merged) == 1L && !is.na(qc_merged) && nzchar(qc_merged)) {
+        # Evaluate the unchanged flag rules on a list so a single flag cannot
+        # be flattened by data.table's single-column replacement semantics.
+        flagged <- process_qc_flag(as.list(metadata), qc_flags_config)
+        data.table::set(metadata, j = "qcMetrics", value = list(flagged$qcMetrics))
+    } else {
+        metadata = process_qc_flag(metadata, qc_flags_config)
+    }
 
     metadata$summary = summary
 
@@ -1826,6 +1843,9 @@ create_metadata <- function(
 #' Create metadata files for all samples in a cohort
 #'
 #' @param cohort Cohort object containing sample information
+#'   Optional qc_merged and qc_sample_key columns select premerged QC. When an
+#'   explicit sample key is absent, ir_analysis_id supplies the IR DNA id, falling
+#'   back to pair for other cohorts. QC is ingested before QC flags are evaluated.
 #' @param output_data_dir Base directory for output files
 #' @param cores Number of cores for parallel processing (default: 1)
 #' @param genome_length Genome length for the samples (for targeted panels or WES data)
@@ -1978,7 +1998,9 @@ lift_metadata <- function(
                     summary = row[["string_summary"]],
                     cohort_type = cohort_type,
                     qc_flags_config = row[["qc_flags"]][[1]],
-                    added_field_values = added_fields_lst
+                    added_field_values = added_fields_lst,
+                    qc_merged = row[["qc_merged"]],
+                    qc_sample_key = qc_sample_key_from_row(row)
                 )
 
                 if (is.null(metadata)) {
@@ -2022,15 +2044,16 @@ lift_metadata <- function(
     return(cohort)
 }
 
-#' @name lift_datafiles_json
-#' @title lift_datafiles_json
+#' @name lift_datafiles_json___DEPRECATED
+#' @title Former list-preserving datafiles aggregation
 #' @description
-#' Create a combined JSON file for all data files in a directory
+#' Retained unchanged for reference; the live aggregator preserves historical
+#' core metadata simplification while keeping provenance lossless.
 #'
 #' @param data_dir Directory containing data files
 #' @return None
 #' @export
-lift_datafiles_json <- function(output_data_dir, cores = 1) {
+lift_datafiles_json___DEPRECATED <- function(output_data_dir, cores = 1) {
   provenance_finalize(output_data_dir)
   if (!dir.exists(output_data_dir)) {
     stop("Data directory does not exist.")
@@ -2085,6 +2108,80 @@ lift_datafiles_json <- function(output_data_dir, cores = 1) {
 
   invisible(convert_json_to_arrow(output_file))
   
+}
+
+#' Create cohort datafiles with historical metadata and lossless provenance
+#'
+#' Core fields retain the pre-provenance fromJSON/unbox/write_json behavior,
+#' including missing scalar omission, nested shapes, and four-digit rounding.
+#' Provenance is excluded from that legacy projection and attached unchanged.
+#' @param output_data_dir Directory containing per-sample metadata.json files.
+#' @param cores Number of workers used to read sample metadata.
+#' @export
+lift_datafiles_json <- function(output_data_dir, cores = 1) {
+  provenance_finalize(output_data_dir)
+  if (!dir.exists(output_data_dir)) {
+    stop("Data directory does not exist.")
+  }
+
+  ## Just expect that the right data directory and structure is provided
+  direcs = list.dirs(output_data_dir, recursive = FALSE)
+  metadata_files = file.path(direcs, "metadata.json")
+  is_present = file.exists(metadata_files)
+  all_absent = !any(is_present)
+  metadata_files = metadata_files[is_present]
+  if (all_absent) {
+    # Recursively look for all files named "metadata.json"
+    message("No metadata.json files found in the specified directory. Attempting recursive search")
+    metadata_files <- list.files(
+        path = output_data_dir,
+        pattern = "metadata\\.json$",
+        recursive = TRUE,
+        full.names = TRUE
+    )
+  }
+
+  if (length(metadata_files) == 0) {
+    stop("No metadata.json files found in the specified directory.")
+  }
+
+  # Read each JSON file and combine them into a list
+  combined_data <- mclapply(
+    X = metadata_files,
+    FUN = function(file) {
+        main = function() {
+            records <- jsonlite::read_json(file, simplifyVector = FALSE)
+            if (length(records) != 1L || is.null(records[[1]]$pair)) stop("Expected one sample metadata record")
+            provenance <- records[[1]]$provenance
+            if (is.null(provenance)) {
+                legacy <- jsonlite::unbox(jsonlite::fromJSON(file))
+            } else {
+                records[[1]]$provenance <- NULL
+                core_json <- jsonlite::toJSON(records, auto_unbox = TRUE, null = "null", digits = NA)
+                legacy <- jsonlite::unbox(jsonlite::fromJSON(core_json))
+            }
+            # Serialize once with the historical defaults before restoring the
+            # native provenance object; atomic publication must not round it.
+            core <- jsonlite::fromJSON(jsonlite::toJSON(
+                list(legacy), auto_unbox = TRUE, pretty = TRUE, null = "null"
+            ), simplifyVector = FALSE)[[1]]
+            if (!is.null(provenance)) core$provenance <- provenance
+            core
+        }
+        tryCatchLog(
+            main(),
+            error = function(e) {
+                warning(sprintf("Error reading %s: %s", file, e$message))
+                NULL
+            }
+        )
+    },
+    mc.cores = cores
+  )
+
+  output_file <- file.path(output_data_dir, "datafiles.json")
+  provenance_atomic_json(Filter(Negate(is.null), combined_data), output_file)
+  invisible(convert_json_to_arrow(output_file))
 }
 
 

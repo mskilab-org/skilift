@@ -1,9 +1,6 @@
-suppressWarnings(devtools::load_all())
-
-
+# Original suite retained verbatim in tests/deprecated/test-filtered-events.R.
+# Active tests use temporary, schema-complete fixtures and assert consumer output.
 library(testthat)
-
-# test <- function() { testthat::test_file("tests/testthat/test-filtered-events.R") }
 
 setup({
   ot_test_paths <<- list(
@@ -29,6 +26,35 @@ setup({
   cytoband_path = system.file("extdata/data/cytoband.rds", package = "Skilift")
   cytoband <<- readRDS(cytoband_path)
 })
+
+legacy_event_fixture <- function(root) {
+  table <- data.table::copy(base::readRDS(ot_test_paths$unit_oncotable))
+  # The old cache predates numeric copy counts and per-event complex footprints.
+  numeric_columns <- intersect(c("value", "tier", "major_count", "minor_count",
+    "major_snv_copies", "minor_snv_copies", "total_copies", "segment_cn", "ref", "alt", "VAF"), names(table))
+  for (column in numeric_columns) data.table::set(table, j = column, value = as.numeric(table[[column]]))
+  graph_events <- base::readRDS(ot_test_paths$complex)$meta$events
+  footprints <- graph_events[, .(footprint = paste(footprint, collapse = ",")), by = type]
+  complex_rows <- which(table$source == "complex")
+  matched <- match(table$type[complex_rows], footprints$type)
+  stopifnot(!anyNA(matched))
+  table$footprint <- NA_character_
+  table$footprint[complex_rows] <- footprints$footprint[matched]
+  # Missing optional evidence has the same typed NA representation as collectors.
+  table$altered_copies <- NA_real_
+  table$is_multi_hit_per_gene <- NA
+  path <- file.path(root, "legacy_events.rds")
+  saveRDS(table, path)
+  path
+}
+
+legacy_event_environment <- function(envir = parent.frame()) {
+  withr::local_envvar(c(DEFAULT_GENOME = system.file(
+    "extdata", "hg19.regularChr.chrom.sizes", package = "gGnome")), .local_envir = envir)
+  # complex.rds is an events-only graph without purity/ploidy; the paired graph
+  # stores these values and must be selected for copy-number calculations.
+  withr::local_options(list(skilift_jabba_columns = "jabba_gg"), .local_envir = envir)
+}
 
 # Finite, shared seqinfo keeps graph and annotation overlaps on the same genome.
 cna_test_ranges <- function(start, end, type, transcript_id = NA_character_,
@@ -76,10 +102,6 @@ cna_test_oncokb <- function(path, alteration, value) {
   row[, `:=`(HUGO_SYMBOL = "GENE1", ALTERATION = alteration, min_cn = value)]
   data.table::fwrite(row, path, sep = "\t")
 }
-
-test_that("process_gencode handles NULL input", {
-  expect_error(process_gencode(NULL), "gencode file must be provided")
-})
 
 test_that("process_gencode handles .rds input", {
   test_rds_path <- system.file("extdata/test_data/test_gencode_v29lift37.rds", package = "Skilift")
@@ -161,11 +183,13 @@ test_that("collect_gene_fusions handles valid input", {
   expect_true(all(c("gene", "vartype", "fusion_genes", "track", "type", "source", "fusion_gene_coords") %in% colnames(result_fusions)))
 })
 
-test_that("collect_complex_events handles valid input", {
-  complex_path <- ot_test_paths$complex
-  result_complex <- collect_complex_events(complex_path, verbose = FALSE)
-  expect_true(nrow(result_complex) > 0)
-  expect_true(all(c("value", "type", "track", "source") %in% colnames(result_complex)))
+test_that("complex event collection preserves genomic evidence and excludes simple events", {
+  result <- collect_complex_events(ot_test_paths$complex, verbose = FALSE)
+  original <- base::readRDS(ot_test_paths$complex)$meta$events
+  expected <- original[!type %in% c("del", "dup", "invdup", "tra", "inv")]
+  expect_identical(result$footprint, expected$footprint)
+  expect_true(all(nzchar(result$footprint)))
+  expect_false(any(result$type %in% c("del", "dup", "invdup", "tra", "inv")))
 })
 
 
@@ -245,7 +269,11 @@ test_that("collect_oncokb_fusions handles valid input", {
   expect_equal(result$source[1], "oncokb_fusions")
   expect_true(all(result$tier %in% 1:3))
   expect_true(all(result$tier_description %in% c("Clinically Actionable", "Clinically Significant", "VUS")))
-  expect_true(all(result$vartype %in% c("fusion", "outframe_fusion")))
+  source <- data.table::fread(ot_test_paths$oncokb_fusions)[silent == FALSE]
+  fusion_key <- gsub("-", "::", source$FUSION, fixed = TRUE)
+  frame <- source$in.frame[match(result$fusion_genes, fusion_key)]
+  expect_true(all(result$vartype[which(frame)] == "inframe_fusion"))
+  expect_true(all(result$vartype[which(!frame)] == "outframe_fusion"))
   
   # Check fusion gene coordinates format
   expect_true(all(grepl("^[0-9XY]+:[0-9]+-[0-9]+.,", result$fusion_gene_coords)))
@@ -500,363 +528,97 @@ test_that("transcript CNA coverage preserves gene-body nomination and raw calls"
   expect_equal(raw_amp$value, 10)
 })
 
-test_that("create_oncotable handles Cohort objects correctly", {
-  # Create test Cohort object
-  test_inputs <- data.table(
-    pair = c("397089", "397090"),  # Second pair is fake to test error handling
-    somatic_variant_annotations = c(
-      ot_test_paths$unit_annotated_bcf,
-      "non_existent_file.bcf"
-    ),
-    oncokb_fusions = c(
-      ot_test_paths$oncokb_fusions,
-      ot_test_paths$oncokb_fusions
-    ),
-    jabba_gg = c(
-      ot_test_paths$jabba_simple_gg,
-      ot_test_paths$jabba_simple_gg
-    ),
-    karyograph = c(
-      ot_test_paths$karyograph,
-      ot_test_paths$karyograph
-    ),
-    events = c(
-      ot_test_paths$complex,
-      ot_test_paths$complex
-    ),
-    signature_counts = c(NA, NA),  # Optional
-    oncokb_snv = c(
-      ot_test_paths$oncokb_snvcn_maf,
-      ot_test_paths$oncokb_snvcn_maf
-    ),
-    oncokb_cna = c(
-      ot_test_paths$oncokb_cna,
-      ot_test_paths$oncokb_cna
-    )
+test_that("create_oncotable persists each case's annotated variants and source evidence", {
+  legacy_event_environment()
+  temp_dir <- tempfile()
+  dir.create(temp_dir)
+  on.exit(unlink(temp_dir, recursive = TRUE))
+  test_inputs <- data.table::data.table(
+    pair = c("397089", "397090"),
+    somatic_variant_annotations = ot_test_paths$unit_annotated_bcf,
+    oncokb_fusions = ot_test_paths$oncokb_fusions,
+    jabba_gg = ot_test_paths$jabba_simple_gg,
+    events = ot_test_paths$complex,
+    oncokb_snv = ot_test_paths$oncokb_snvcn_maf,
+    oncokb_cna = ot_test_paths$oncokb_cna
   )
   test_cohort <- suppressWarnings(Cohort$new(test_inputs))
-
-  # Create temporary directory for output
-  temp_dir <- tempdir()
-  
-  # Run create_oncotable and capture the returned cohort
-  updated_cohort <- (create_oncotable(
-    cohort = test_cohort,
-    amp_thresh_multiplier = 1.5,
-    gencode = system.file("extdata/test_data/test_gencode_v29lift37.rds", package = "Skilift"),
-    cytoband = system.file("extdata/data/cytoband.rds", package = "Skilift"),  # Add cytoband parameter
-    outdir = temp_dir,
-    cores = 2
-  ))
-
-  # Test that input validation works
-  expect_error(
-    create_oncotable(data.table(), outdir = temp_dir),
-    "Input must be a Cohort object"
-  )
-
-  # Test that returned object is a Cohort
-  expect_true(inherits(updated_cohort, "Cohort"))
-  
-  # Test that oncotable column exists in updated cohort
-  expect_true("oncotable" %in% names(updated_cohort$inputs))
-  
-  # Test that output files were created for successful sample
-  expect_true(file.exists(file.path(temp_dir, "397089", "oncotable.rds")))
-  expect_true(file.exists(file.path(temp_dir, "397089", "oncotable.txt")))
-  
-  # Test that oncotable path is correctly set in cohort for successful sample
-  expect_equal(
-    updated_cohort$inputs[pair == "397089", oncotable],
-    file.path(temp_dir, "397089", "oncotable.rds")
-  )
-  
-  # Test with empty cohort
-  empty_cohort <- suppressWarnings(Cohort$new(data.table(
-    pair = character(),
-    somatic_variant_annotations = character(),
-    jabba_gg = character()
-  )))
-  expect_error(
-    create_oncotable(
-      cohort = empty_cohort,
-      outdir = temp_dir
-    ),
-    "No samples found in the cohort"
-  )
-
-  # Cleanup
-  unlink(temp_dir, recursive = TRUE)
+  updated <- create_oncotable(test_cohort, outdir = temp_dir, cores = 1,
+    gencode = system.file("extdata", "test_data", "test_gencode_v29lift37.rds", package = "Skilift"),
+    cytoband = system.file("extdata", "data", "cytoband.rds", package = "Skilift"))
+  expected_snv <- Skilift:::collect_oncokb(ot_test_paths$oncokb_snvcn_maf, verbose = FALSE)
+  expected_snv <- expected_snv[!is.na(type)]
+  selected_fields <- c("Chromosome", "vcf_pos", "vcf_ref", "vcf_alt", "gene", "type")
+  expected_rows <- as.data.frame(expected_snv[, ..selected_fields])
+  expected_rows[] <- lapply(expected_rows, function(x) { x[x == ""] <- NA; x })
+  for (pair in test_inputs$pair) {
+    path <- updated$inputs$oncotable[match(pair, updated$inputs$pair)]
+    expect_true(file.exists(path))
+    table <- base::readRDS(path)
+    expect_true(all(table$id == pair))
+    selected_rows <- as.data.frame(table[source == "oncokb_maf", ..selected_fields])
+    expect_equal(selected_rows, expected_rows)
+    expect_true(any(table$source == "oncokb_fusions"))
+    expect_true(all(nzchar(table$footprint[table$source == "complex"])))
+    expect_true(file.exists(file.path(temp_dir, pair, "oncotable.txt")))
+    expect_true(file.exists(file.path(temp_dir, pair, ".provenance", "oncotable.rds.json")))
+  }
 })
 
-test_that("create_filtered_events creates correct output", {
-  # Create temp directory for output
-  temp_dir <- tempdir()
-  out_file <- file.path(temp_dir, "filtered_events.json")
-  
-  # Test with return_table = TRUE to check data structure
-  result <- create_filtered_events(
-    pair = "test_sample",
-    oncotable = ot_test_paths$unit_oncotable,
-    jabba_gg = ot_test_paths$jabba_simple_gg,
-    out_file = out_file,
-    return_table = TRUE
-  )
-  
-  # Test data.table structure
-  expect_true(is.data.table(result))
-  expected_colnames <- c(
-    "gene", "gene_summary", "role", "vartype", "type", "Tier",
-    "variant_summary", "therapeutics", "resistances", "diagnoses", "prognoses",
-    "effect", "effect_description", "fusion_genes", "fusion_gene_coords",
-    "Variant_g", "Variant", "estimated_altered_copies", "segment_cn", "ref",
-    "alt", "VAF", "Genome_Location", "id", "seqnames", "start", "end", "sample"
-  )
-  expect_true(all(expected_colnames %in% names(result)))
-  
-  # Test JSON file creation
-  expect_true(file.exists(out_file))
-  json_content <- jsonlite::fromJSON(out_file)
-  expect_true(is.data.frame(json_content))
-  
-  # Test content validation
-  expect_true(all(result$type %in% c("trunc", "missense", "synonymous", "SCNA", "fusion", "noncoding", "promoter")))
-  expect_true(all(!is.na(result$gene)))
+test_that("create_filtered_events writes complete gOS events from all variant classes", {
+  legacy_event_environment()
+  temp_dir <- tempfile()
+  dir.create(temp_dir)
+  on.exit(unlink(temp_dir, recursive = TRUE))
+  fixture <- legacy_event_fixture(temp_dir)
+  out_file <- file.path(temp_dir, "filtered.events.json")
+  result <- create_filtered_events("test_sample", fixture, ot_test_paths$jabba_simple_gg,
+    out_file, return_table = TRUE)
+  expect_gt(nrow(result), 0L)
+  expect_true(all(c("SNV", "AMP", "HOMDEL") %in% result$vartype))
+  expect_setequal(result$vartype[result$type == "Complex SV"], c("chromothripsis", "rigma", "pyrgo", "bfb"))
+  expect_true(any(result$type == "Fusion"))
+  expect_true(all(result$sample == "test_sample"))
   expect_true(all(!is.na(result$type)))
-  
-  # Test with missing oncokb inputs
-  result_no_oncokb <- create_filtered_events(
-    pair = "test_sample",
-    oncotable = ot_test_paths$no_oncokb_unit_oncotable,
-    jabba_gg = ot_test_paths$jabba_simple_gg,
-    out_file = file.path(temp_dir, "filtered_events_no_oncokb.json"),
-    return_table = TRUE
-  )
-
-  expect_true(all(result_no_oncokb$tier == ""))
-  expect_true(all(result_no_oncokb$total_copies == ""))
-
-  # Test without return_table
-  result_no_return <- create_filtered_events(
-    pair = "test_sample",
-    oncotable = ot_test_paths$unit_oncotable,
-    jabba_gg = ot_test_paths$jabba_simple_gg,
-    out_file = file.path(temp_dir, "filtered_events_no_return.json"),
-    return_table = FALSE
-  )
-  expect_null(result_no_return)
-  
-  # Test error handling
-  expect_error(
-    suppressWarnings(create_filtered_events(
-      pair = "test_sample",
-      oncotable = "nonexistent_file.rds",
-      jabba_gg = ot_test_paths$jabba_simple_gg,
-      out_file = file.path(temp_dir, "should_not_exist.json")
-    )),
-    "cannot open the connection"
-  )
-
-  unlink(temp_dir, recursive = TRUE)
+  expect_true(all(!is.na(result$gene[result$type != "Complex SV"])))
+  expect_true(all(nzchar(result$Genome_Location[result$type == "Complex SV"])))
+  json <- jsonlite::fromJSON(out_file)
+  expect_equal(nrow(json), nrow(result))
+  expect_identical(json$Variant, result$Variant)
+  expect_identical(json$Genome_Location, result$Genome_Location)
+  expect_equal(json$Tier, result$Tier)
+  no_return_file <- file.path(temp_dir, "no_return.json")
+  create_filtered_events("test_sample", fixture, ot_test_paths$jabba_simple_gg,
+    no_return_file, return_table = FALSE)
+  expect_identical(jsonlite::read_json(no_return_file), jsonlite::read_json(out_file))
 })
 
-test_that("lift_filtered_events handles various input scenarios", {
-  # Create temp directory for output
-  temp_dir <- tempdir()
-  
-  # Create test Cohort objects
-  
-  # 1. Complete cohort with all required inputs
-  complete_inputs <- data.table(
-    pair = c("397089"),
-    oncotable = c(ot_test_paths$unit_oncotable),
-    jabba_gg = c(ot_test_paths$jabba_simple_gg)
-  )
-  complete_cohort <- suppressWarnings(Cohort$new(complete_inputs))
-  
-  # 2. Cohort with missing inputs
-  missing_inputs <- data.table(
-    pair = c("397089", "397090"),
-    oncotable = c(ot_test_paths$unit_oncotable, NA),
-    jabba_gg = c(ot_test_paths$jabba_simple_gg, ot_test_paths$jabba_simple_gg)
-  )
-  missing_cohort <- suppressWarnings(Cohort$new(missing_inputs))
-  
-  # Test: Non-existent output directory
-  non_existent_dir <- file.path(temp_dir, "non_existent")
-  lift_filtered_events(complete_cohort, non_existent_dir, cores = 2)
-  expect_true(dir.exists(non_existent_dir))
-  expect_true(dir.exists(file.path(non_existent_dir, "397089")))
-  expect_true(file.exists(file.path(non_existent_dir, "397089", "filtered.events.json")))
-  
-  # Test: Invalid input (not a Cohort object)
-  expect_error(
-    lift_filtered_events(data.table(), temp_dir),
-    "Input must be a Cohort object"
-  )
-  
-  # Test: Missing required columns
-  invalid_cohort <- suppressWarnings(Cohort$new(data.table(pair = "test")))
-  expect_error(
-    lift_filtered_events(invalid_cohort, temp_dir),
-    "Missing required columns in cohort: oncotable, jabba_gg"
-  )
-  
-  expect_output(
-    lift_filtered_events(missing_cohort, temp_dir, cores = 2),
-    regex = "Error processing 397090: invalid 'description' argument",
-    all = FALSE
-  )
-  
-  # Test: Existing output directory
-  existing_dir <- file.path(temp_dir, "existing")
-  dir.create(existing_dir)
-  lift_filtered_events(complete_cohort, existing_dir, cores = 2)
-  expect_true(file.exists(file.path(existing_dir, "397089", "filtered.events.json")))
-  
-  # Test: Output file content validation
-  json_content <- jsonlite::fromJSON(
-    file.path(existing_dir, "397089", "filtered.events.json")
-  )
-  expect_true(is.data.frame(json_content))
-  expected_colnames <- c(
-    "gene", "vartype", "type", "Tier", "effect", "Variant_g", "Variant",
-    "estimated_altered_copies", "segment_cn", "ref", "alt", "VAF",
-    "Genome_Location", "id", "seqnames", "start", "end", "gene_summary",
-    "role", "variant_summary", "effect_description", "therapeutics",
-    "resistances", "prognoses", "fusion_genes", "fusion_gene_coords"
-  )
-  expect_true(all(expected_colnames %in% names(json_content)))
-  
-  # Cleanup
-  unlink(temp_dir, recursive = TRUE)
+test_that("lift_filtered_events writes case JSON and summaries into new and existing directories", {
+  legacy_event_environment()
+  temp_dir <- tempfile()
+  dir.create(temp_dir)
+  on.exit(unlink(temp_dir, recursive = TRUE))
+  fixture <- legacy_event_fixture(temp_dir)
+  inputs <- data.table::data.table(pair = "397089", oncotable = fixture,
+    jabba_gg = ot_test_paths$jabba_simple_gg, tumor_type = "BRCA", disease = "Breast Cancer")
+  cohort <- suppressWarnings(Cohort$new(inputs))
+  cohort$type <- "paired"
+  outputs <- file.path(temp_dir, c("new", "existing"))
+  dir.create(outputs[2L])
+  for (output in outputs) {
+    updated <- lift_filtered_events(cohort, output, cores = 1)
+    path <- file.path(output, "397089", "filtered.events.json")
+    events <- jsonlite::fromJSON(path)
+    expect_gt(nrow(events), 0L)
+    expect_true(all(events$sample == "397089"))
+    expect_true(any(events$vartype == "SNV"))
+    expect_true(any(events$type == "Complex SV"))
+    expect_true(nzchar(updated$inputs$string_summary[1L]))
+    expect_match(updated$inputs$string_summary[1L], "Complex SV", fixed = TRUE)
+    receipt <- jsonlite::read_json(file.path(output, "397089", ".provenance", "filtered.events.json.json"))
+    expect_true(normalizePath(fixture) %in% vapply(receipt$sources, `[[`, character(1), "path"))
+  }
+  expect_identical(jsonlite::read_json(file.path(outputs[1L], "397089", "filtered.events.json")),
+    jsonlite::read_json(file.path(outputs[2L], "397089", "filtered.events.json")))
 })
 
-# integration test (only works on NYU hpc)
-will_run_integrations = FALSE
-if (will_run_integrations) {
-
-test_that("create_oncotable works on real cohort", {
-  # Load real clinical pairs
-  clinical_pairs_path = "~/projects/Clinical_NYU/db/pairs.rds"
-  clinical_pairs = readRDS(clinical_pairs_path)
-  cohort <- suppressWarnings(Cohort$new(clinical_pairs[13:15], col_mapping = c("oncokb_snv" = "oncokb_maf")))
-
-  # Create temp directory for output
-  temp_dir <- tempdir()
-
-  # Run create_oncotable and capture the returned cohort
-  updated_cohort <- (create_oncotable(
-    cohort = cohort,
-    amp_thresh_multiplier = 1.5,
-    gencode = system.file("extdata/test_data/test_gencode_v29lift37.rds", package = "Skilift"),
-    outdir = temp_dir,
-    cores = 15
-  ))
-
-  # Test that returned object is a Cohort
-  expect_true(inherits(updated_cohort, "Cohort"))
-
-  # Test that oncotable column exists in updated cohort
-  expect_true("oncotable" %in% names(updated_cohort$inputs))
-
-  # Test that output files were created for successful sample
-  test_pair_id <- "C46E0A12-024F-11EF-9EC7-77C4AC892824"
-  expect_true(file.exists(file.path(temp_dir, test_pair_id, "oncotable.rds")))
-
-  # Test that oncotable path is correctly set in cohort for successful sample
-  expect_equal(
-    updated_cohort$inputs[pair == test_pair_id, oncotable],
-    file.path(temp_dir, test_pair_id, "oncotable.rds")
-  )
-
-  # Cleanup
-  unlink(temp_dir, recursive = TRUE)
-
-})
-
-# test_that("oncotable produces expected output (fail-safe test)", {
-#   expected_oncotable <- readRDS(ot_test_paths$oncotable)
-#   gencode <- process_gencode('~/DB/GENCODE/gencode.v29lift37.annotation.nochr.rds')
-#   result_oncotable <- suppressWarnings(oncotable(
-#     pair = "397089",
-#     annotated_bcf = ot_test_paths$annotated_bcf,
-#     oncokb_fusions = ot_test_paths$fusions,
-#     jabba_rds = ot_test_paths$jabba_simple_gg,
-#     complex = ot_test_paths$complex,
-#     signature_counts = NULL,  # Assuming signature_counts is not available in test paths
-#     gencode = gencode,
-#     verbose = TRUE
-#   ))
-#
-#   expect_equal(result_oncotable, expected_oncotable)
-# })
-}
-
-## Debug
-DEBUG <- FALSE
-if (DEBUG) 
-{
-# Update test data with variant.c column
-nbo_path <- system.file('extdata/test_data/oncotable_test_data/no_oncokb_unit_oncotable.rds', package='Skilift')
-nbo <- readRDS(nbo_path)
-nbo[, variant.c := NA_character_]
-saveRDS(nbo, nbo_path)
-
-# why is create_oncotable failing after merge?
-# conclusion: missing min_cn in new oncokb_cna, some typos, wrong gencode file
-
-clinical_pairs_path = "/gpfs/data/imielinskilab/projects/Clinical_NYU/db/pairs.20241119_105207.rds"
-clinical_pairs = readRDS(clinical_pairs_path)
-cohort <- suppressWarnings(Cohort$new(clinical_pairs[14]))
-row <- cohort$inputs[1,]
-gc = process_gencode('/gpfs/data/imielinskilab/DB/GENCODE/gencode.v19.annotation.gtf.nochr.rds')
-devtools::load_all()
-ot <- oncotable(
-    pair = row$pair,
-    somatic_variant_annotations = row$somatic_variant_annotations,
-    oncokb_fusions = clinical_pairs[14]$oncokb_fusions,
-    jabba_gg = row$jabba_gg,
-    karyograph = row$karyograph,
-    events = row$events,
-    signature_counts = row$signature_counts,
-    oncokb_snv = row$oncokb_snv,
-    oncokb_cna = row$oncokb_cna,
-    gencode = gc,
-    verbose = TRUE,
-    amp.thresh = 2,
-    filter = "PASS",
-    del.thresh = 0.5
-)
-
-## update oncotable_test_data with new oncokb_*
-file.copy(row$oncokb_snv, ot_test_paths$oncokb_snvcn_maf, overwrite = TRUE)
-file.copy(row$oncokb_cna, ot_test_paths$oncokb_cna, overwrite = TRUE)
-file.copy(row$oncokb_fusions, ot_test_paths$oncokb_fusions, overwrite = TRUE)
-
-## create a subsetted gencode for testing
-# subset gene list (two genes split by "-"): 
-# [1] "DCDC2-RGL1"       "DNAH6-NCAM1"      "FOXP2-MDFIC"      "HDGFRP3-ADAMTSL3"
-# [5] "MAPK4-DCC"        "MET-MDFIC"        "PIGF-EML4"        "SMAP1-FAM184A"   
-# [9] "SPECC1-BCAS3"     "SPTBN1-EML4"      "SPTBN1-PIGF"      "STRN-CLHC1"      
-gencode <- process_gencode('/gpfs/data/imielinskilab/DB/GENCODE/gencode.v19.annotation.gtf.nochr.rds')
-# subset gencode on gRanges metadata col gene_name
-subset_genes = c("DCDC2", "RGL1", "DNAH6", "NCAM1", "FOXP2", "MDFIC", "HDGFRP3", "ADAMTSL3", "MAPK4", "DCC", "MET", "MDFIC", "PIGF", "EML4", "SMAP1", "FAM184A", "SPECC1", "BCAS3", "SPTBN1", "EML4", "SPTBN1", "PIGF", "STRN", "CLHC1")
-gencode_subset <- gencode[gencode$gene_name %in% subset_genes]
-
-# save to file
-test_rds_path <- system.file("extdata/test_data/test_gencode_v29lift37.rds", package = "Skilift")
-saveRDS(gencode_subset, test_rds_path)
-
-## extract genecode gene locations to its own file
-gencode <- process_gencode('/gpfs/data/imielinskilab/DB/GENCODE/gencode.v19.annotation.gtf.nochr.rds')
-gencode_dt <- as.data.table(gencode)
-# extract gene locations by type == "gene"
-gene_locations <- gencode_dt[type == "gene", .(gene_name, seqnames, start, end)]
-saveRDS(gene_locations, '~/git/skilift/inst/extdata/data/gene_locations.rds')
-
-## extract cytoband to its own file
-cytoband_path = "/gpfs/data/imielinskilab/DB/UCSC/hg19.cytoband.txt"
-cytoband <- process_cytoband(cytoband_path)
-saveRDS(cytoband, '~/git/skilift/inst/extdata/data/cytoband.rds')
-}

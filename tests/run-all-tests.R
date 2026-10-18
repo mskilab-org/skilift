@@ -19,5 +19,9 @@ testthat::test_file("tests/testthat/test-variant-qc.R")
 testthat::test_file("tests/testthat/test-multiplicity.R")
 testthat::test_file("tests/testthat/test-signatures.R")
 testthat::test_file("tests/testthat/test-lift-wrappers.R")
+testthat::test_file("tests/testthat/test-provenance.R")
+testthat::test_file("tests/testthat/test-annotation-merge.R")
+testthat::test_file("tests/testthat/test-provenance-table.R")
+testthat::test_file("tests/testthat/test-qc-ingest.R")
 
 
