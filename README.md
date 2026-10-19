@@ -155,6 +155,175 @@ the cohort for that plot type. The lifter methods can be run in parallel, and
 the number of cores can be specified by setting the `cores` parameter. By
 default, the lifter methods will use 1 core.
 
+## Production provenance
+
+Skilift records **production receipts** for instrumented lifters automatically;
+this does not require `use_provenance_table = TRUE`. Receipts describe inputs
+observed by readers during production, not inputs inferred later from filenames.
+The optional [table cache](#cached-provenance-tables-opt-in) adds separate
+collected/curated artifacts and SHA-256 validation.
+
+### Interaction points
+
+| Interaction | Provenance behavior |
+| --- | --- |
+| `Cohort$new(...)` | Retains matched input-column names in `provenance_column_mapping`; construction from a pipeline output directory also records the input CSV path in `provenance_input_path`. An in-memory table has no input-file path to record. |
+| `lift_all(...)` | Starts an upload record under `<output_data_dir>/.uploads/<id>/`: `cohort.rds` snapshots the cohort before lifting, `inputs.json` holds its input rows, and `upload.json` records the snapshot hash, reference, study, arguments, Skilift version and `skilift*` options. The returned cohort exposes `provenance_upload`. |
+| Individual lifters | Instrumented readers capture sources; successful writers publish a receipt beside the output. Calling a lifter directly does not start an upload snapshot. Standalone readers outside a lifter context do not create receipts. |
+| `lift_metadata(...)` | Captures field-level sources and literal overrides as well as the whole metadata artifact. By default it also calls `lift_datafiles_json()`; set `do_lift_datafiles_json = FALSE` to defer aggregation. |
+| `lift_datafiles_json(output_data_dir)` | Folds current receipts into each existing case's `metadata.json`, then preserves the provenance object in cohort `datafiles.json`. Call this after additional standalone lifters to refresh the published view. `lift_all()` does this after its final outputs. |
+| `write_provenance_table()` / `read_provenance_table()` | Write stage manifests and receipts, or hash-check and read a stage. When consumed inside an active lifter, the cached table joins its lineage. See [cache interrogation](#interrogate-and-curate-a-cached-table). |
+
+For a manually composed workflow, finish with aggregation:
+
+```r
+lift_metadata(cohort, output_data_dir = output_data_dir, cores = 1,
+              do_lift_datafiles_json = FALSE)
+# Run any other required lifters before publishing the combined metadata.
+lift_datafiles_json(output_data_dir = output_data_dir, cores = 1)
+```
+
+### Where evidence lives and what it means
+
+- `<output_data_dir>/<pair>/.provenance/<output-basename>.json` is the
+  latest artifact receipt. For example, `filtered.events.json` has receipt
+  `.provenance/filtered.events.json.json`.
+- `.provenance/field-<field>.json` records a metadata field, with a JSON Pointer
+  such as `/0/tumor_median_coverage`. `.provenance/history/production-*.json`
+  retains each published receipt; `recordId` identifies that historical record.
+  This is receipt history, **not a backup of old output bytes**.
+- After aggregation, `metadata.json` is still a one-row array. Its first row's
+  `provenance` has `schemaVersion`, `caseId`, `recordedAt` and `artifacts`.
+  `artifacts` includes both file receipts and field receipts; distinguish them
+  by `path` and optional `pointer`. Aggregation requires an existing metadata
+  row; it does not create one for receipt-only case directories.
+- Receipts include production time, producer version, reference, parameters,
+  selection details where supplied (for example `graphColumn`), upload context,
+  sources and an `outputFingerprint`. Each source includes its supplied absolute
+  `path`, role/cohort columns, original input column and table path when known,
+  and `fingerprintAtUse` (`resolvedPath`, byte `size`, numeric `mtime`, `state`).
+- A source's nested `production` is the upstream receipt captured when it was
+  read. It is attached only if the upstream output's resolved path, size and
+  modification time still match. Follow `sources[].production.sources[]` to
+  trace transformed inputs back through earlier producers.
+- `evidence = "captured"` means reader-observed sources. Artifact
+  `sourceScope = "reader-session"` can include all reads accumulated in that
+  worker, not a proven minimal dependency set. Field receipts use
+  `sourceScope = "metadata-reader"`; `metadataInputs` records declared derived
+  metadata dependencies. `evidence = "literal"` records a value without a file
+  source, with origins such as `cohort-input`, `metadata-transform` or
+  `added-field-override`. It does not mean missing evidence of a file read.
+
+Fingerprints are **not content hashes**: equal size/mtime does not establish
+byte identity. Receipts describe production-time state, not current validity;
+aggregation does not revalidate files or rerun stale outputs. Old/uninstrumented
+outputs can lack receipts, and an absent field receipt is not proof that a value
+was manually supplied. Metadata receipts also retain `outputValues` (or
+`outputValue` for a field), because aggregation itself changes `metadata.json`.
+Keep hidden receipt/upload directories when retaining provenance, and review
+paths, input rows and snapshots before sharing a report outside its intended
+audience.
+
+### Interrogate a report in R
+
+These examples use an existing lifted case. Keep JSON as nested lists rather
+than simplifying heterogeneous receipts into data frames:
+
+```r
+output_data_dir <- "build/data"
+pair <- "CASE_ID"                         # a pair present in this output
+case_dir <- file.path(output_data_dir, pair)
+metadata <- jsonlite::read_json(file.path(case_dir, "metadata.json"),
+                                simplifyVector = FALSE)[[1]]
+records <- metadata$provenance$artifacts
+
+# Which inputs and settings produced the metadata file?
+artifact <- Filter(function(x) identical(x$path, "metadata.json") &&
+                     is.null(x$pointer), records)
+lapply(artifact, function(x) x[c("producedAt", "producer", "reference",
+                                "selection", "parameters", "sources")])
+
+# Why does this coverage value appear? Distinguish a file read from an override.
+coverage <- Filter(function(x) identical(x$path, "metadata.json") &&
+                     identical(x$pointer, "/0/tumor_median_coverage"), records)
+lapply(coverage, function(x) x[c("outputValue", "evidence", "origin",
+                                "sources", "metadataInputs")])
+```
+
+An empty result means no matching receipt was published. To inspect a receipt
+before aggregation, read its `.provenance/<output-basename>.json` directly.
+For a cohort-wide query, read `datafiles.json` with `simplifyVector = FALSE`
+and select the row by `pair`; the same `provenance$artifacts` structure is there.
+
+Trace upstream producers recursively, including sources of intermediate tables:
+
+```r
+source_tree <- function(record) {
+  lapply(record$sources, function(source) {
+    list(path = source$path, role = source$role,
+         originalColumn = source$originalColumn,
+         fingerprintAtUse = source$fingerprintAtUse,
+         upstream = if (is.null(source$production)) NULL else
+           source_tree(source$production))
+  })
+}
+lapply(records, source_tree)
+```
+
+Recover the exact upload input row from a receipt, rather than a later cohort:
+
+```r
+uploads <- Filter(function(x) !is.null(x$upload$snapshot$path), records)
+if (length(uploads)) {
+  upload <- uploads[[1]]$upload
+  snapshot <- upload$snapshot$path
+  stopifnot(identical(digest::digest(file = snapshot, algo = "sha256"),
+                      upload$snapshot$sha256))
+  original_cohort <- readRDS(snapshot)
+  original_cohort$inputs[original_cohort$inputs$pair == pair, ]
+  upload[c("id", "startedAt", "arguments", "options", "cachedCohort", "remapping")]
+}
+```
+
+A standalone lift may have no upload. Cases lifted across multiple uploads can
+have different upload IDs on different artifact receipts; inspect the receipt
+for the output of interest rather than assuming one upload owns the whole case.
+
+Inspect previous productions of one output (optionally add a `pointer` filter
+to select a metadata field):
+
+```r
+history_paths <- list.files(file.path(case_dir, ".provenance", "history"),
+                            pattern = "\\.json$", full.names = TRUE)
+history <- lapply(history_paths, jsonlite::read_json, simplifyVector = FALSE)
+history <- Filter(function(x) identical(x$path, "metadata.json") &&
+                    is.null(x$pointer), history)
+lapply(history, function(x) x[c("recordId", "producedAt", "outputValues", "sources")])
+```
+
+### Cached-cohort replay and explicit remapping (internal integration hooks)
+
+`Skilift:::provenance_load_cohort(path)` loads a saved cohort without
+rediscovering inputs and records its path, fingerprint and SHA-256 in
+`provenance_cached_cohort`. `Skilift:::provenance_apply_remapping(cohort, proposal)`
+validates a complete replacement proposal before changing the in-memory inputs:
+
+```r
+replay <- Skilift:::provenance_load_cohort("cached-cohort.rds")
+proposal <- list(schemaVersion = 1L, caseId = "CASE_ID", changes = list(
+  list(column = "tumor_coverage", fromPath = "/original/coverage.rds",
+       toPath = "/replacement/coverage.rds")
+))
+Skilift:::provenance_apply_remapping(replay, proposal)
+# A subsequent lift_all(replay, ...) records the proposal in its upload.
+```
+
+The case must match exactly one row, each column can appear only once, each
+`fromPath` must exactly match the recorded input, and every `toPath` must exist.
+The saved cohort is not rewritten. Replacement content/reference compatibility
+is not validated by this hook. These `:::` helpers are internal, not exported
+stable APIs; there is no automatic path search or remapping when a source moves.
+
 ## Cached provenance tables (opt-in)
 
 The provenance-table path is additive. Existing `oncotable()`,
@@ -278,6 +447,44 @@ editing its digest. Without a manifest the reader can resolve conventional
 filenames, but there is no recorded hash to check. Input receipts join the
 active provenance lineage. Hash validation is **not** automatic invalidation
 when upstream inputs or curation parameters change; rerun the owning stage.
+
+### Interrogate and curate a cached table
+
+For an existing collected cache, inspect the manifest before choosing a stage.
+This example assumes the collected table has a `gene` column and illustrates
+an application-defined gene selection, not a built-in clinical curation rule:
+
+```r
+cache_root <- "build/provenance"            # use the actual cache root
+pair <- "CASE_ID"
+manifest_path <- provenance_table_paths(cache_root, pair, "collected")$manifest
+manifest <- jsonlite::read_json(manifest_path, simplifyVector = FALSE)
+names(manifest$stages)
+manifest$stages$collected[c("path", "format", "rows", "columns", "sha256",
+                            "producedAt", "inputs", "parameters")]
+
+collected <- read_provenance_table(cache_root, pair, stage = "collected")
+genes_to_report <- c("TP53", "KRAS")
+collected[gene %in% genes_to_report]
+
+# Persist an explicit curation boundary and its dependency on the collected file.
+curated_path <- write_provenance_table(
+  collected[gene %in% genes_to_report], cache_root, pair, stage = "curated",
+  inputs = list(collected = manifest$stages$collected$path),
+  parameters = list(genes_to_report = genes_to_report)
+)
+curated <- read_provenance_table(cache_root, pair, stage = "curated")
+manifest <- jsonlite::read_json(manifest_path, simplifyVector = FALSE)
+manifest$stages$curated$inputs$collected   # recorded parent path and SHA-256
+manifest$stages$curated$parameters
+```
+
+The manifest records file-level inputs and parameters, not per-cell annotation
+lineage. Passing an in-memory table cannot recover its original file sources;
+supply existing source paths through `inputs` when writing a manual stage.
+Reading a manifest alone does not verify its table; `read_provenance_table()`
+performs that check. Ordinary stage receipts and their history are also written
+under the cache pair's `.provenance/` directory, separate from report outputs.
 
 ### Generic QC premerge and metadata ingest
 
