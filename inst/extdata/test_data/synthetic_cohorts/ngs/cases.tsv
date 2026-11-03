@@ -1,0 +1,4 @@
+pair	patient_id	assay	assay_date	cohort_type	tumor_sample	normal_sample	case_dir
+MOCK-NGS-001-T___vs___MOCK-NGS-001-N	MOCK-PATIENT-ngs	WGS	2000-01-01	paired	MOCK-NGS-001-T	MOCK-NGS-001-N	paired/results/MOCK-NGS-001-T___vs___MOCK-NGS-001-N
+MOCK-NGS-002-T___vs___MOCK-NGS-002-N	MOCK-PATIENT-ngs	WGS	2000-02-01	paired	MOCK-NGS-002-T	MOCK-NGS-002-N	paired/results/MOCK-NGS-002-T___vs___MOCK-NGS-002-N
+MOCK-NGS-003-T		WGS	2000-03-01	tumor_only	MOCK-NGS-003-T		tumor_only/results/MOCK-NGS-003-T

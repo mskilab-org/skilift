@@ -1,0 +1,46 @@
+profile	pair	role	path	source_created_at	frontend_updated_at
+ngs	MOCK-NGS-001-T___vs___MOCK-NGS-001-N	oncokb_snv	ngs/paired/results/MOCK-NGS-001-T___vs___MOCK-NGS-001-N/oncokb/merged_oncokb.maf	2000-01-02T00:00:00Z	2000-01-03T00:00:00Z
+ngs	MOCK-NGS-001-T___vs___MOCK-NGS-001-N	multiplicity	ngs/paired/results/MOCK-NGS-001-T___vs___MOCK-NGS-001-N/snv_multiplicity/est_snv_cn_somatic.rds	2000-01-02T00:00:00Z	2000-01-03T00:00:00Z
+ngs	MOCK-NGS-001-T___vs___MOCK-NGS-001-N	somatic_snvs	ngs/paired/results/MOCK-NGS-001-T___vs___MOCK-NGS-001-N/sage/somatic/MOCK-NGS-001-T___vs___MOCK-NGS-001-N.sage.pass_filtered.vcf.gz	2000-01-02T00:00:00Z	2000-01-03T00:00:00Z
+ngs	MOCK-NGS-001-T___vs___MOCK-NGS-001-N	somatic_variant_annotations	ngs/paired/results/MOCK-NGS-001-T___vs___MOCK-NGS-001-N/snpeff/somatic/MOCK-NGS-001-T___vs___MOCK-NGS-001-N_somatic.ann.vcf	2000-01-02T00:00:00Z	2000-01-03T00:00:00Z
+ngs	MOCK-NGS-001-T___vs___MOCK-NGS-001-N	tumor_coverage	ngs/paired/results/MOCK-NGS-001-T___vs___MOCK-NGS-001-N/dryclean/tumor/drycleaned.cov.rds	2000-01-02T00:00:00Z	2000-01-03T00:00:00Z
+ngs	MOCK-NGS-001-T___vs___MOCK-NGS-001-N	segments_cbs	ngs/paired/results/MOCK-NGS-001-T___vs___MOCK-NGS-001-N/cbs/seg.rds	2000-01-02T00:00:00Z	2000-01-03T00:00:00Z
+ngs	MOCK-NGS-001-T___vs___MOCK-NGS-001-N	oncokb_cna	ngs/paired/results/MOCK-NGS-001-T___vs___MOCK-NGS-001-N/oncokb/merged_oncokb_cna.tsv	2000-01-02T00:00:00Z	2000-01-03T00:00:00Z
+ngs	MOCK-NGS-001-T___vs___MOCK-NGS-001-N	oncokb_fusions	ngs/paired/results/MOCK-NGS-001-T___vs___MOCK-NGS-001-N/oncokb/merged_oncokb_fusions.tsv	2000-01-02T00:00:00Z	2000-01-03T00:00:00Z
+ngs	MOCK-NGS-001-T___vs___MOCK-NGS-001-N	structural_variants	ngs/paired/results/MOCK-NGS-001-T___vs___MOCK-NGS-001-N/sv_chimera_filter/tumor/MOCK-NGS-001-T.gridss.filtered.ffpe_filtered.vcf.gz	2000-01-02T00:00:00Z	2000-01-03T00:00:00Z
+ngs	MOCK-NGS-002-T___vs___MOCK-NGS-002-N	oncokb_snv	ngs/paired/results/MOCK-NGS-002-T___vs___MOCK-NGS-002-N/oncokb/merged_oncokb.maf	2000-02-02T00:00:00Z	2000-02-03T00:00:00Z
+ngs	MOCK-NGS-002-T___vs___MOCK-NGS-002-N	multiplicity	ngs/paired/results/MOCK-NGS-002-T___vs___MOCK-NGS-002-N/snv_multiplicity/est_snv_cn_somatic.rds	2000-02-02T00:00:00Z	2000-02-03T00:00:00Z
+ngs	MOCK-NGS-002-T___vs___MOCK-NGS-002-N	somatic_snvs	ngs/paired/results/MOCK-NGS-002-T___vs___MOCK-NGS-002-N/sage/somatic/MOCK-NGS-002-T___vs___MOCK-NGS-002-N.sage.pass_filtered.vcf.gz	2000-02-02T00:00:00Z	2000-02-03T00:00:00Z
+ngs	MOCK-NGS-002-T___vs___MOCK-NGS-002-N	somatic_variant_annotations	ngs/paired/results/MOCK-NGS-002-T___vs___MOCK-NGS-002-N/snpeff/somatic/MOCK-NGS-002-T___vs___MOCK-NGS-002-N_somatic.ann.vcf	2000-02-02T00:00:00Z	2000-02-03T00:00:00Z
+ngs	MOCK-NGS-002-T___vs___MOCK-NGS-002-N	tumor_coverage	ngs/paired/results/MOCK-NGS-002-T___vs___MOCK-NGS-002-N/dryclean/tumor/drycleaned.cov.rds	2000-02-02T00:00:00Z	2000-02-03T00:00:00Z
+ngs	MOCK-NGS-002-T___vs___MOCK-NGS-002-N	segments_cbs	ngs/paired/results/MOCK-NGS-002-T___vs___MOCK-NGS-002-N/cbs/seg.rds	2000-02-02T00:00:00Z	2000-02-03T00:00:00Z
+ngs	MOCK-NGS-002-T___vs___MOCK-NGS-002-N	oncokb_cna	ngs/paired/results/MOCK-NGS-002-T___vs___MOCK-NGS-002-N/oncokb/merged_oncokb_cna.tsv	2000-02-02T00:00:00Z	2000-02-03T00:00:00Z
+ngs	MOCK-NGS-002-T___vs___MOCK-NGS-002-N	oncokb_fusions	ngs/paired/results/MOCK-NGS-002-T___vs___MOCK-NGS-002-N/oncokb/merged_oncokb_fusions.tsv	2000-02-02T00:00:00Z	2000-02-03T00:00:00Z
+ngs	MOCK-NGS-002-T___vs___MOCK-NGS-002-N	structural_variants	ngs/paired/results/MOCK-NGS-002-T___vs___MOCK-NGS-002-N/sv_chimera_filter/tumor/MOCK-NGS-002-T.gridss.filtered.ffpe_filtered.vcf.gz	2000-02-02T00:00:00Z	2000-02-03T00:00:00Z
+ngs	MOCK-NGS-003-T	oncokb_snv	ngs/tumor_only/results/MOCK-NGS-003-T/oncokb/merged_oncokb.maf		2000-03-03T00:00:00Z
+ngs	MOCK-NGS-003-T	multiplicity	ngs/tumor_only/results/MOCK-NGS-003-T/snv_multiplicity/est_snv_cn_somatic.rds		2000-03-03T00:00:00Z
+ngs	MOCK-NGS-003-T	somatic_snvs	ngs/tumor_only/results/MOCK-NGS-003-T/sage/somatic/MOCK-NGS-003-T.sage.pass_filtered.vcf.gz		2000-03-03T00:00:00Z
+ngs	MOCK-NGS-003-T	somatic_variant_annotations	ngs/tumor_only/results/MOCK-NGS-003-T/snpeff/somatic/MOCK-NGS-003-T_somatic.ann.vcf		2000-03-03T00:00:00Z
+ngs	MOCK-NGS-003-T	tumor_coverage	ngs/tumor_only/results/MOCK-NGS-003-T/dryclean/tumor/drycleaned.cov.rds		2000-03-03T00:00:00Z
+ngs	MOCK-NGS-003-T	segments_cbs	ngs/tumor_only/results/MOCK-NGS-003-T/cbs/seg.rds		2000-03-03T00:00:00Z
+ngs	MOCK-NGS-003-T	oncokb_cna	ngs/tumor_only/results/MOCK-NGS-003-T/oncokb/merged_oncokb_cna.tsv		2000-03-03T00:00:00Z
+ngs	MOCK-NGS-003-T	oncokb_fusions	ngs/tumor_only/results/MOCK-NGS-003-T/oncokb/merged_oncokb_fusions.tsv		2000-03-03T00:00:00Z
+ngs	MOCK-NGS-003-T	structural_variants	ngs/tumor_only/results/MOCK-NGS-003-T/sv_chimera_filter/tumor/MOCK-NGS-003-T.gridss.filtered.ffpe_filtered.vcf.gz		2000-03-03T00:00:00Z
+myeloseq	MOCK-MYELO-001-DNA_v1_MOCK-MYELO-001-RNA_v1	oncokb_snv	myeloseq/MOCK-MYELO-001/MOCK-MYELO-001-DNA_v1_MOCK-MYELO-001-RNA_v1/merged_oncokb.maf	2000-01-02T00:00:00Z	2000-01-03T00:00:00Z
+myeloseq	MOCK-MYELO-001-DNA_v1_MOCK-MYELO-001-RNA_v1	multiplicity	myeloseq/MOCK-MYELO-001/MOCK-MYELO-001-DNA_v1_MOCK-MYELO-001-RNA_v1/est_snv_cn.rds	2000-01-02T00:00:00Z	2000-01-03T00:00:00Z
+myeloseq	MOCK-MYELO-001-DNA_v1_MOCK-MYELO-001-RNA_v1	somatic_snvs	myeloseq/MOCK-MYELO-001/MOCK-MYELO-001-DNA_v1_MOCK-MYELO-001-RNA_v1/SmallVariants.filtered.vcf	2000-01-02T00:00:00Z	2000-01-03T00:00:00Z
+myeloseq	MOCK-MYELO-001-DNA_v1_MOCK-MYELO-001-RNA_v1	somatic_variant_annotations	myeloseq/MOCK-MYELO-001/MOCK-MYELO-001-DNA_v1_MOCK-MYELO-001-RNA_v1/SmallVariants.vcf	2000-01-02T00:00:00Z	2000-01-03T00:00:00Z
+myeloseq	MOCK-MYELO-001-DNA_v1_MOCK-MYELO-001-RNA_v1	structural_variants	myeloseq/MOCK-MYELO-001/MOCK-MYELO-001-DNA_v1_MOCK-MYELO-001-RNA_v1/fusions_filtered.vcf.gz	2000-01-02T00:00:00Z	2000-01-03T00:00:00Z
+myeloseq	MOCK-MYELO-001-DNA_v1_MOCK-MYELO-001-RNA_v1	qc_metrics	myeloseq/MOCK-MYELO-001/qc_merged.json	2000-01-02T00:00:00Z	2000-01-03T00:00:00Z
+myeloseq	MOCK-MYELO-002-DNA_v1_MOCK-MYELO-002-RNA_v1	oncokb_snv	myeloseq/MOCK-MYELO-002/MOCK-MYELO-002-DNA_v1_MOCK-MYELO-002-RNA_v1/merged_oncokb.maf	2000-02-02T00:00:00Z	2000-02-03T00:00:00Z
+myeloseq	MOCK-MYELO-002-DNA_v1_MOCK-MYELO-002-RNA_v1	multiplicity	myeloseq/MOCK-MYELO-002/MOCK-MYELO-002-DNA_v1_MOCK-MYELO-002-RNA_v1/est_snv_cn.rds	2000-02-02T00:00:00Z	2000-02-03T00:00:00Z
+myeloseq	MOCK-MYELO-002-DNA_v1_MOCK-MYELO-002-RNA_v1	somatic_snvs	myeloseq/MOCK-MYELO-002/MOCK-MYELO-002-DNA_v1_MOCK-MYELO-002-RNA_v1/SmallVariants.filtered.vcf	2000-02-02T00:00:00Z	2000-02-03T00:00:00Z
+myeloseq	MOCK-MYELO-002-DNA_v1_MOCK-MYELO-002-RNA_v1	somatic_variant_annotations	myeloseq/MOCK-MYELO-002/MOCK-MYELO-002-DNA_v1_MOCK-MYELO-002-RNA_v1/SmallVariants.vcf	2000-02-02T00:00:00Z	2000-02-03T00:00:00Z
+myeloseq	MOCK-MYELO-002-DNA_v1_MOCK-MYELO-002-RNA_v1	structural_variants	myeloseq/MOCK-MYELO-002/MOCK-MYELO-002-DNA_v1_MOCK-MYELO-002-RNA_v1/fusions_filtered.vcf.gz	2000-02-02T00:00:00Z	2000-02-03T00:00:00Z
+myeloseq	MOCK-MYELO-002-DNA_v1_MOCK-MYELO-002-RNA_v1	qc_metrics	myeloseq/MOCK-MYELO-002/qc_merged.json	2000-02-02T00:00:00Z	2000-02-03T00:00:00Z
+myeloseq	MOCK-MYELO-003-DNA_v1_MOCK-MYELO-003-RNA_v1	oncokb_snv	myeloseq/MOCK-MYELO-003/MOCK-MYELO-003-DNA_v1_MOCK-MYELO-003-RNA_v1/merged_oncokb.maf		2000-03-03T00:00:00Z
+myeloseq	MOCK-MYELO-003-DNA_v1_MOCK-MYELO-003-RNA_v1	multiplicity	myeloseq/MOCK-MYELO-003/MOCK-MYELO-003-DNA_v1_MOCK-MYELO-003-RNA_v1/est_snv_cn.rds		2000-03-03T00:00:00Z
+myeloseq	MOCK-MYELO-003-DNA_v1_MOCK-MYELO-003-RNA_v1	somatic_snvs	myeloseq/MOCK-MYELO-003/MOCK-MYELO-003-DNA_v1_MOCK-MYELO-003-RNA_v1/SmallVariants.filtered.vcf		2000-03-03T00:00:00Z
+myeloseq	MOCK-MYELO-003-DNA_v1_MOCK-MYELO-003-RNA_v1	somatic_variant_annotations	myeloseq/MOCK-MYELO-003/MOCK-MYELO-003-DNA_v1_MOCK-MYELO-003-RNA_v1/SmallVariants.vcf		2000-03-03T00:00:00Z
+myeloseq	MOCK-MYELO-003-DNA_v1_MOCK-MYELO-003-RNA_v1	structural_variants	myeloseq/MOCK-MYELO-003/MOCK-MYELO-003-DNA_v1_MOCK-MYELO-003-RNA_v1/fusions_filtered.vcf.gz		2000-03-03T00:00:00Z
+myeloseq	MOCK-MYELO-003-DNA_v1_MOCK-MYELO-003-RNA_v1	qc_metrics	myeloseq/MOCK-MYELO-003/qc_merged.json		2000-03-03T00:00:00Z

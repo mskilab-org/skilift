@@ -1,0 +1,12 @@
+##fileformat=VCFv4.2
+##source=SkiliftSyntheticFixtures
+##reference=GRCh37
+##contig=<ID=1,length=249250621>
+##contig=<ID=2,length=243199373>
+##FILTER=<ID=LowQual,Description="Synthetic low quality example">
+##INFO=<ID=ANN,Number=.,Type=String,Description="Synthetic SnpEff annotation">
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##FORMAT=<ID=AD,Number=R,Type=Integer,Description="Allelic depths">
+##FORMAT=<ID=DP,Number=1,Type=Integer,Description="Read depth">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	MOCK-MYELO-002-DNA
+1	1101	MOCK_VARIANT_1	A	G	60	PASS	ANN=G|missense_variant|MODERATE|MOCK1|MOCK1|transcript|MOCK_TRANSCRIPT|protein_coding|1/1|c.1A>G|p.Lys1Glu|1/30|1/30|1/10||	GT:AD:DP	0/1:30,10:40

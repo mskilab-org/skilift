@@ -1,0 +1,13 @@
+{
+  "MOCK-MYELO-001-DNA": {
+    "mean_depth": 200,
+    "total_reads": 10000,
+    "pf_aligned_bases": 900000,
+    "mean_read_length": 100,
+    "fraction_of_reads_aligned": 0.9,
+    "pf_reads_aligned": 9000,
+    "uniformity": 0.95,
+    "on_target": 0.9,
+    "percent_aligned": 90
+  }
+}
