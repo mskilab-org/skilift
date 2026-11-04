@@ -13,7 +13,9 @@ lift_multiplicity(
   field = "altered_copies",
   show_only_oncokb = TRUE,
   cores = 1,
-  custom_annotation_fields = list(custom_field = NULL)
+  custom_annotation_fields = list(custom_field = NULL),
+  provenance = TRUE,
+  .provenance_context = NULL
 )
 }
 \arguments{
@@ -24,6 +26,10 @@ lift_multiplicity(
 \item{is_germline}{Logical indicating if mutations are germline (default: FALSE)}
 
 \item{cores}{Number of cores for parallel processing (default: 1)}
+
+\item{provenance}{Enable per-Case provenance recording (default: TRUE).}
+
+\item{.provenance_context}{Internal shared per-run provenance collector. Do not set directly.}
 }
 \value{
 None

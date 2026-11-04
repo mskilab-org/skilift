@@ -8,7 +8,9 @@ lift_segment_width_distribution(
   cohort,
   output_data_dir,
   annotations = NULL,
-  cores = 1
+  cores = 1,
+  provenance = TRUE,
+  .provenance_context = NULL
 )
 }
 \arguments{
@@ -19,6 +21,10 @@ lift_segment_width_distribution(
 \item{annotations}{(list) Optional annotations to include in JSON output (default: NULL)}
 
 \item{cores}{Number of cores for parallel processing (default: 1)}
+
+\item{provenance}{Enable per-Case provenance recording (default: TRUE).}
+
+\item{.provenance_context}{Internal shared per-run provenance collector. Do not set directly.}
 }
 \value{
 None

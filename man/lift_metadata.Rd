@@ -11,7 +11,9 @@ lift_metadata(
   genome_length = c(1:22, "X", "Y"),
   do_lift_datafiles_json = TRUE,
   added_fields = list(tmb = c(field = "tmb")),
-  added_from_schema = list(Skilift:::template_metadata)
+  added_from_schema = list(Skilift:::template_metadata),
+  provenance = TRUE,
+  .provenance_context = NULL
 )
 }
 \arguments{
@@ -22,6 +24,10 @@ lift_metadata(
 \item{cores}{Number of cores for parallel processing (default: 1)}
 
 \item{genome_length}{Genome length for the samples (for targeted panels or WES data)}
+
+\item{provenance}{Enable per-Case provenance recording (default: TRUE).}
+
+\item{.provenance_context}{Internal shared per-run provenance collector. Do not set directly.}
 }
 \value{
 None

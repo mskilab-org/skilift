@@ -4,7 +4,24 @@
 \alias{lift_2d_purity_ploidy_plot}
 \title{Lift 2d purity ploidy}
 \usage{
-lift_2d_purity_ploidy_plot(cohort, output_data_dir, cores = 1)
+lift_2d_purity_ploidy_plot(
+  cohort,
+  output_data_dir,
+  cores = 1,
+  provenance = TRUE,
+  .provenance_context = NULL
+)
+}
+\arguments{
+\item{cohort}{Cohort object containing sample information}
+
+\item{output_data_dir}{Base directory for output files}
+
+\item{cores}{Number of cores for parallel processing (default: 1)}
+
+\item{provenance}{Enable per-Case provenance recording (default: TRUE).}
+
+\item{.provenance_context}{Internal shared per-run provenance collector. Do not set directly.}
 }
 \description{
 Lift 2d purity ploidy

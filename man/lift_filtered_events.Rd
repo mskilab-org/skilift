@@ -13,7 +13,9 @@ lift_filtered_events(
   show_all_tags = FALSE,
   show_all_small_muts_tags = FALSE,
   show_all_cna_tags = FALSE,
-  show_all_svs_tags = FALSE
+  show_all_svs_tags = FALSE,
+  provenance = TRUE,
+  .provenance_context = NULL
 )
 }
 \arguments{
@@ -22,6 +24,10 @@ lift_filtered_events(
 \item{output_data_dir}{Base directory for output files}
 
 \item{cores}{Number of cores for parallel processing (default: 1)}
+
+\item{provenance}{Enable per-Case provenance recording (default: TRUE).}
+
+\item{.provenance_context}{Internal shared per-run provenance collector. Do not set directly.}
 }
 \value{
 None

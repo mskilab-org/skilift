@@ -11,7 +11,8 @@ create_filtered_events(
   out_file,
   return_table = FALSE,
   cohort_type = "paired",
-  additional_columns = NULL
+  additional_columns = NULL,
+  hemedb_path = Skilift:::HEMEDB()
 )
 }
 \arguments{
@@ -24,6 +25,8 @@ create_filtered_events(
 \item{out_file}{path to write json}
 
 \item{return_table}{TRUE/FALSE whether to return the data.table}
+
+\item{hemedb_path}{Path to the Heme database used for Heme event filtering.}
 }
 \value{
 data.table or NULL

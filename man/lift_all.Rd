@@ -11,7 +11,8 @@ lift_all(
   genome_length = NULL,
   width = 10000,
   gencode = Skilift::get_default_gencode(),
-  ...
+  ...,
+  provenance = TRUE
 )
 }
 \arguments{
@@ -22,6 +23,8 @@ lift_all(
 \item{cores}{Number of cores for parallel processing (default: 1)}
 
 \item{...}{Additional arguments}
+
+\item{provenance}{Enable per-Case provenance recording (default: TRUE).}
 }
 \value{
 None

@@ -1781,6 +1781,8 @@ create_metadata <- function(
 #' @param output_data_dir Base directory for output files
 #' @param cores Number of cores for parallel processing (default: 1)
 #' @param genome_length Genome length for the samples (for targeted panels or WES data)
+#' @param provenance Enable per-Case provenance recording (default: TRUE).
+#' @param .provenance_context Internal shared per-run provenance collector.
 #' @return None
 #' @export
 lift_metadata <- function(
@@ -1792,7 +1794,9 @@ lift_metadata <- function(
     added_fields = list(
         tmb = c("field" = "tmb")
     ),
-    added_from_schema = list(Skilift:::template_metadata)
+    added_from_schema = list(Skilift:::template_metadata),
+    provenance = TRUE,
+    .provenance_context = NULL
 ) {
     if (!inherits(cohort, "Cohort")) {
         stop("Input must be a Cohort object")
@@ -1801,6 +1805,12 @@ lift_metadata <- function(
     if (!dir.exists(output_data_dir)) {
         dir.create(output_data_dir, recursive = TRUE)
     }
+
+    provenance_call <- provenance_acquire_context(
+        output_data_dir, enabled = provenance, context = .provenance_context
+    )
+    provenance_context <- provenance_call$context
+    if (provenance_call$owns) on.exit(provenance_finish(provenance_context), add = TRUE)
 
     lift_inputs = pairify_cohort_inputs(cohort, tumor_normal_columns = c("wgs_metrics"), keep_remaining = TRUE, sep_cast = "_")
 
@@ -1844,13 +1854,14 @@ lift_metadata <- function(
         }
         
         out_file <- file.path(pair_dir, "metadata.json")
+        staged_file <- NULL
 
         # prefer oncokb_snv over somatic_snvs if available
-        is_oncokb_present = !is.null(row$oncokb_snv) && !is.na(row$oncokb_snv)
-        snvs_column = row$somatic_snvs
-        if (is_oncokb_present) {
-            snvs_column = row$oncokb_snv
-        }
+        oncokb_snv <- row[["oncokb_snv"]]
+        is_oncokb_present = !is.null(oncokb_snv) && length(oncokb_snv) > 0L &&
+            !all(is.na(oncokb_snv))
+        snvs_column_name <- if (is_oncokb_present) "oncokb_snv" else "somatic_snvs"
+        snvs_column = row[[snvs_column_name]]
         
         inferred_sex_field = row$inferred_sex
 
@@ -1885,6 +1896,39 @@ lift_metadata <- function(
         }
         
         
+        input_bindings <- list()
+        if (!is.null(provenance_context)) {
+            input_columns <- c(
+                    graph = jabba_column, events = "events", snvs = snvs_column_name,
+                    tumor_coverage = "tumor_coverage",
+                    estimate_library_complexity = "estimate_library_complexity",
+                    alignment_summary_metrics = "alignment_summary_metrics",
+                    insert_size_metrics = "insert_size_metrics",
+                    tumor_wgs_metrics = "tumor_wgs_metrics", normal_wgs_metrics = "normal_wgs_metrics",
+                    het_pileups = "het_pileups",
+                    decomposed_sbs_signatures = "decomposed_sbs_signatures",
+                    decomposed_indel_signatures = "decomposed_indel_signatures",
+                    matrix_sbs_signatures = "matrix_sbs_signatures",
+                    matrix_indel_signatures = "matrix_indel_signatures",
+                    activities_sbs_signatures = "activities_sbs_signatures",
+                    activities_indel_signatures = "activities_indel_signatures",
+                    hrdetect = "hrdetect", onenesstwoness = "onenesstwoness",
+                    msisensorpro = "msisensorpro", purple_pp_bestFit = "purple_pp_bestFit",
+                    conpair_contamination = "conpair_contamination", conpair_concordance = "conpair_concordance"
+            )
+            input_bindings <- provenance_input_bindings(
+                row, provenance_metadata_columns(row, input_columns)
+            )
+            if (is_purple_qc_path_valid) {
+                purple_qc_binding <- if (!is_purple_qc_null) {
+                    provenance_input_bindings(row, c(purple_qc = "purple_qc"))
+                } else {
+                    provenance_direct_binding(purple_qc_path_for_fread, "purple_qc")
+                }
+                input_bindings <- c(input_bindings, purple_qc_binding)
+            }
+        }
+
         futile.logger::flog.threshold("ERROR")
         tryCatchLog({
 
@@ -1936,17 +1980,32 @@ lift_metadata <- function(
             }
             
             # Write to JSON
+            staged_file <- provenance_stage_output(provenance_context, out_file)
             jsonlite::write_json(
                 metadata,
-                out_file,
+                staged_file,
                 auto_unbox = TRUE,
                 pretty = TRUE,
                 null = "null"
             )
+            if (!is.null(provenance_context)) {
+                provenance_queue_output(
+                    provenance_context,
+                    pair = as.character(row$pair),
+                    artifact_key = "metadata.json",
+                    lifter = "lift_metadata",
+                    inputs = input_bindings,
+                    staged_path = staged_file,
+                    final_path = out_file
+                )
+            }
 
             return(metadata)
             
         }, error = function(e) {
+            if (!is.null(provenance_context) && !is.null(staged_file) && file.exists(staged_file)) {
+                unlink(staged_file)
+            }
             print(sprintf("Error processing %s: %s", row$pair, e$message))
             NULL
         })
@@ -1959,8 +2018,10 @@ lift_metadata <- function(
 
     do_lift_datafiles_json = identical(do_lift_datafiles_json, TRUE)
 
-    if (do_lift_datafiles_json && TRUE) ## excessive checking to make sure nothing dumb happens
+    if (do_lift_datafiles_json && TRUE) {
+        if (provenance_call$owns) provenance_finish(provenance_context)
         Skilift::lift_datafiles_json(output_data_dir = output_data_dir, cores = cores)
+    }
     
     return(cohort)
 }

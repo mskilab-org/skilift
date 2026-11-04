@@ -4,7 +4,15 @@
 \alias{lift_bam}
 \title{lift_bam}
 \usage{
-lift_bam(cohort, output_data_dir, cores = 1, overwrite = FALSE, copy = FALSE)
+lift_bam(
+  cohort,
+  output_data_dir,
+  cores = 1,
+  overwrite = FALSE,
+  copy = FALSE,
+  provenance = TRUE,
+  .provenance_context = NULL
+)
 }
 \arguments{
 \item{cohort}{Cohort object containing sample information}
@@ -12,6 +20,10 @@ lift_bam(cohort, output_data_dir, cores = 1, overwrite = FALSE, copy = FALSE)
 \item{output_data_dir}{Base directory for output files}
 
 \item{cores}{Number of cores for parallel processing (default: 1)}
+
+\item{provenance}{Enable per-Case provenance recording (default: TRUE).}
+
+\item{.provenance_context}{Internal shared per-run provenance collector. Do not set directly.}
 }
 \value{
 None

@@ -82,9 +82,12 @@ create_mutations_catalog <- function(sigmat_path, is_indel = FALSE) {
 #' @param cohort Cohort object containing sample information
 #' @param output_data_dir Base directory for output files
 #' @param cores Number of cores for parallel processing (default: 1)
+#' @param provenance Enable per-Case provenance recording (default: TRUE).
+#' @param .provenance_context Internal shared per-run provenance collector.
 #' @return None
 #' @export
-lift_signatures <- function(cohort, output_data_dir, cores = 1) {
+lift_signatures <- function(cohort, output_data_dir, cores = 1,
+                            provenance = TRUE, .provenance_context = NULL) {
     if (!inherits(cohort, "Cohort")) {
         stop("Input must be a Cohort object")
     }
@@ -92,6 +95,12 @@ lift_signatures <- function(cohort, output_data_dir, cores = 1) {
     if (!dir.exists(output_data_dir)) {
         dir.create(output_data_dir, recursive = TRUE)
     }
+
+    provenance_call <- provenance_acquire_context(
+        output_data_dir, enabled = provenance, context = .provenance_context
+    )
+    provenance_context <- provenance_call$context
+    if (provenance_call$owns) on.exit(provenance_finish(provenance_context), add = TRUE)
     
     # Define processing configurations
     signature_configs <- list(
@@ -143,6 +152,8 @@ lift_signatures <- function(cohort, output_data_dir, cores = 1) {
             dir.create(pair_dir, recursive = TRUE)
         }
         
+        staged_file <- NULL
+        queued_stages <- character()
         futile.logger::flog.threshold("ERROR")
         tryCatchLog({
             # Process all signature types
@@ -152,21 +163,42 @@ lift_signatures <- function(cohort, output_data_dir, cores = 1) {
                     input_file <- row[[config$input_col]]
                     
                     if (file.exists(input_file)) {
+                        input_bindings <- if (!is.null(provenance_context)) {
+                            provenance_input_bindings(row, stats::setNames(config$input_col, sig_type))
+                        } else list()
                         result <- config$processor(
                             input_file,
                             is_indel = config$is_indel
                         )
+                        output_path <- file.path(pair_dir, config$output_file)
+                        staged_file <- provenance_stage_output(provenance_context, output_path)
                         jsonlite::write_json(
                             result,
-                            file.path(pair_dir, config$output_file),
+                            staged_file,
                             pretty = TRUE
                         )
+                        if (!is.null(provenance_context)) {
+                            provenance_queue_output(
+                                provenance_context,
+                                pair = as.character(row$pair),
+                                artifact_key = config$output_file,
+                                lifter = "lift_signatures",
+                                inputs = input_bindings,
+                                staged_path = staged_file,
+                                final_path = output_path
+                            )
+                            queued_stages <- c(queued_stages, staged_file)
+                        }
                     } else {
                         warning(sprintf("Missing input file for %s: %s", row$pair, input_file))
                     }
                 }
             }
         }, error = function(e) {
+            if (!is.null(provenance_context) && !is.null(staged_file) &&
+                file.exists(staged_file) && !staged_file %in% queued_stages) {
+                unlink(staged_file)
+            }
             print(sprintf("Error processing %s: %s", row$pair, e$message))
         })
     }, mc.cores = cores, mc.preschedule = TRUE)

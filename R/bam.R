@@ -7,9 +7,12 @@
 #' @param cohort Cohort object containing sample information
 #' @param output_data_dir Base directory for output files
 #' @param cores Number of cores for parallel processing (default: 1)
+#' @param provenance Enable per-Case provenance recording (default: TRUE).
+#' @param .provenance_context Internal shared per-run provenance collector.
 #' @return None
 #' @export
-lift_bam <- function(cohort, output_data_dir, cores = 1, overwrite = FALSE, copy = FALSE) {
+lift_bam <- function(cohort, output_data_dir, cores = 1, overwrite = FALSE, copy = FALSE,
+                     provenance = TRUE, .provenance_context = NULL) {
     if (!inherits(cohort, "Cohort")) {
         stop("Input must be a Cohort object")
     }
@@ -62,59 +65,66 @@ lift_bam <- function(cohort, output_data_dir, cores = 1, overwrite = FALSE, copy
                                          )
     }
 
+    provenance_call <- provenance_acquire_context(
+        output_data_dir, enabled = provenance, context = .provenance_context
+    )
+    provenance_context <- provenance_call$context
+    if (provenance_call$owns) on.exit(provenance_finish(provenance_context), add = TRUE)
+
     # Process each sample in parallel
-    
     upload_bam = function(i) {
         row <- lift_inputs[i,]
         pair_dir <- file.path(output_data_dir, row$pair)
-        
-        if (!dir.exists(pair_dir)) {
-            dir.create(pair_dir, recursive = TRUE)
+        if (!dir.exists(pair_dir)) dir.create(pair_dir, recursive = TRUE)
+
+        transfer_one <- function(source, destination, artifact_key, source_column,
+                                 input_role) {
+            if (is.null(source) || !length(source) || anyNA(source) || !nzchar(as.character(source)[1])) {
+                return(invisible(NULL))
+            }
+            if (file.exists(destination) && !all(overwrite) && !all(copy)) {
+                return(invisible(NULL))
+            }
+            staged <- provenance_stage_output(provenance_context, destination)
+            command <- paste(transfer_method, shQuote(as.character(source)[1]), shQuote(staged))
+            status <- system(command)
+            if (status != 0L || !file.exists(staged) || dir.exists(staged)) {
+                if (!is.null(provenance_context)) {
+                    if (file.exists(staged)) unlink(staged)
+                }
+                return(invisible(NULL))
+            }
+            if (!is.null(provenance_context)) {
+                inputs <- provenance_input_bindings(
+                    row, stats::setNames(source_column, input_role)
+                )
+                provenance_queue_output(
+                    provenance_context,
+                    pair = as.character(row$pair),
+                    artifact_key = artifact_key,
+                    lifter = "lift_bam",
+                    inputs = inputs,
+                    staged_path = staged,
+                    final_path = destination
+                )
+            }
+            invisible(NULL)
         }
-        
-        tumor_bam_file <- file.path(pair_dir, "tumor.bam")
-        tumor_bai_file <- file.path(pair_dir, "tumor.bam.bai")
 
-		is_tumor_bam_out_exists = file.exists(tumor_bam_file)
-		is_tumor_bai_out_exists = file.exists(tumor_bai_file)
-
-        normal_bam_file <- file.path(pair_dir, "normal.bam")
-        normal_bai_file <- file.path(pair_dir, "normal.bam.bai")
-
-		is_normal_bam_out_exists = file.exists(normal_bam_file)
-		is_normal_bai_out_exists = file.exists(normal_bai_file)
-        
         futile.logger::flog.threshold("ERROR")
         tryCatchLog({
-          exit_tbam = 0
-          exit_tbai = 0
-          exit_nbam = 0
-          exit_nbai = 0
-
-		  is_input_tumor_bam_present = !is.null(row$tumor_bam) && ! any(is.na(row$tumor_bam))
-		  is_input_normal_bam_present = !is.null(row$normal_bam) && ! any(is.na(row$normal_bam))
-
-          if (is_input_tumor_bam_present) {
-            cmd_bam = glue::glue('{transfer_method} {row$tumor_bam} {tumor_bam_file}')
-            cmd_bai = glue::glue('{transfer_method} {row$tumor_bam_bai} {tumor_bai_file}')
-            exit_tbam = system(cmd_bam)
-            exit_tbai = system(cmd_bai)
-          }
-        
-          if (is_input_normal_bam_present) {
-            cmd_bam = glue::glue('{transfer_method} {row$normal_bam} {normal_bam_file}')
-            cmd_bai = glue::glue('{transfer_method} {row$normal_bam_bai} {normal_bai_file}')
-            exit_nbam = system(cmd_bam)
-            exit_nbai = system(cmd_bai)
-          }
-        #   stopifnot(
-		# 	exit_tbam == 0 
-		# 	&& exit_tbai == 0 
-		# 	&& exit_nbam == 0
-		# 	&& exit_nbai == 0
-		# )
-
- 
+            if (!is.null(row$tumor_bam) && !any(is.na(row$tumor_bam))) {
+                transfer_one(row$tumor_bam, file.path(pair_dir, "tumor.bam"),
+                             "tumor.bam", "tumor_bam", "tumor_bam")
+                transfer_one(row$tumor_bam_bai, file.path(pair_dir, "tumor.bam.bai"),
+                             "tumor.bam.bai", "tumor_bam_bai", "tumor_bai")
+            }
+            if (!is.null(row$normal_bam) && !any(is.na(row$normal_bam))) {
+                transfer_one(row$normal_bam, file.path(pair_dir, "normal.bam"),
+                             "normal.bam", "normal_bam", "normal_bam")
+                transfer_one(row$normal_bam_bai, file.path(pair_dir, "normal.bam.bai"),
+                             "normal.bam.bai", "normal_bam_bai", "normal_bai")
+            }
         }, error = function(e) {
             print(sprintf("Error processing %s: %s", row$pair, e$message))
             NULL

@@ -91,6 +91,22 @@ get_segstats <- function(
     return(segstats_dt)
 }
 
+segment_width_segstats_fields <- function() {
+    c(
+        "start_ix", "end_ix", "eslack_in", "eslack_out",
+        "edges_in", "edges_out", "tile_id", "snode_id",
+        "loose_left", "loose_right", "loose_cn_left",
+        "loose_cn_right", "node_id", "raw_mean", "raw_var",
+        "nbins", "nbins_tot", "nbins_nafrac", "wbins_nafrac",
+        "wbins_ok", "mean", "bad", "max_na", "loess_var",
+        "tau_sq_post", "post_var", "var", "sd"
+    )
+}
+
+segment_width_graph_has_segstats <- function(ggraph) {
+    all(segment_width_segstats_fields() %in% names(ggraph$nodes$dt))
+}
+
 #' @name lift_segment_width_distribution
 #' @title lift_segment_width_distribution
 #' @description
@@ -100,16 +116,26 @@ get_segstats <- function(
 #' @param output_data_dir Base directory for output files
 #' @param annotations (list) Optional annotations to include in JSON output (default: NULL)
 #' @param cores Number of cores for parallel processing (default: 1)
+#' @param provenance Enable per-Case provenance recording (default: TRUE).
+#' @param .provenance_context Internal shared per-run provenance collector.
 #' @return None
 #' @export
 lift_segment_width_distribution <- function(
     cohort,
     output_data_dir,
     annotations = NULL,
-    cores = 1) {
+    cores = 1,
+    provenance = TRUE,
+    .provenance_context = NULL) {
     if (!inherits(cohort, "Cohort")) {
         stop("Input must be a Cohort object")
     }
+
+    provenance_call <- provenance_acquire_context(
+        output_data_dir, enabled = provenance, context = .provenance_context
+    )
+    provenance_context <- provenance_call$context
+    if (provenance_call$owns) on.exit(provenance_finish(provenance_context), add = TRUE)
 
     # Validate required columns exist
     jabba_column = Skilift::DEFAULT_JABBA(object = cohort)
@@ -131,6 +157,7 @@ lift_segment_width_distribution <- function(
         }
 
         out_file <- file.path(pair_dir, "ppfit.json")
+        staged_file <- NULL
 
         futile.logger::flog.threshold("ERROR")
         tryCatchLog(
@@ -140,6 +167,9 @@ lift_segment_width_distribution <- function(
                     return(NULL)
                 }
 
+                input_bindings <- if (!is.null(provenance_context)) {
+                    provenance_input_bindings(row, c(graph = jabba_column))
+                } else list()
                 # Read the gGraph
                 ggraph <- process_jabba(row[[jabba_column]])
                 if (!any(class(ggraph) == "gGraph")) {
@@ -155,21 +185,17 @@ lift_segment_width_distribution <- function(
 
 
                 # Check for required fields
-                colnames_check <- c(
-                    "start_ix", "end_ix", "eslack_in", "eslack_out",
-                    "edges_in", "edges_out", "tile_id", "snode_id",
-                    "loose_left", "loose_right", "loose_cn_left",
-                    "loose_cn_right", "node_id", "raw_mean", "raw_var",
-                    "nbins", "nbins_tot", "nbins_nafrac", "wbins_nafrac",
-                    "wbins_ok", "mean", "bad", "max_na", "loess_var",
-                    "tau_sq_post", "post_var", "var", "sd"
-                )
-
-                if (all(colnames_check %in% names(ggraph$nodes$dt))) {
+                if (segment_width_graph_has_segstats(ggraph)) {
                     gg_w_segstats <- ggraph
-                    fields.keep <- c(colnames_check, "seqnames", "start", "end", "strand", "width", "loose", "index")
+                    fields.keep <- c(segment_width_segstats_fields(), "seqnames", "start", "end", "strand", "width", "loose", "index")
                 } else {
                     # Get segstats information
+                    if (!is.null(provenance_context)) {
+                        input_bindings <- c(
+                            input_bindings,
+                            provenance_input_bindings(row, c(coverage = "tumor_coverage"))
+                        )
+                    }
                     segstats.dt <- get_segstats(
                         balanced_jabba_gg = row[[jabba_column]],
                         tumor_coverage = row$tumor_coverage,
@@ -194,16 +220,31 @@ lift_segment_width_distribution <- function(
 
                 # Create JSON
                 ggout = gGnome::refresh(ggraph.reduced)
+                staged_file <- provenance_stage_output(provenance_context, out_file)
                 ggout$json(
-                    filename = out_file,
+                    filename = staged_file,
                     verbose = TRUE,
                     annotations = annotations,
                     maxcn = 500,
                     nfields = fields.keep,
                     save = TRUE
                 )
+                if (!is.null(provenance_context) && file.exists(staged_file)) {
+                    provenance_queue_output(
+                        provenance_context,
+                        pair = as.character(row$pair),
+                        artifact_key = "ppfit.json",
+                        lifter = "lift_segment_width_distribution",
+                        inputs = input_bindings,
+                        staged_path = staged_file,
+                        final_path = out_file
+                    )
+                }
             },
             error = function(e) {
+                if (!is.null(provenance_context) && !is.null(staged_file) && file.exists(staged_file)) {
+                    unlink(staged_file)
+                }
                 print(sprintf("Error processing %s: %s", row$pair, e$message))
             }
         )
@@ -219,6 +260,8 @@ lift_segment_width_distribution <- function(
 #' @param output_data_dir Base directory for output files
 #' @param cores Number of cores for parallel processing (default: 1)
 #' @param file.name Name of the output file (default: "hetsnps_major_minor.png")
+#' @param provenance Enable per-Case provenance recording (default: TRUE).
+#' @param .provenance_context Internal shared per-run provenance collector.
 #' @export 
 #' @author Johnathan Rafailov
 lift_allelic_pp_fit <- function(cohort, 
@@ -226,10 +269,18 @@ lift_allelic_pp_fit <- function(cohort,
                                 cores = 1,
                                 save_png = TRUE,
                                 save_data = TRUE, 
-                                file.name = "hetsnps_major_minor.png") {
+                                file.name = "hetsnps_major_minor.png",
+                                provenance = TRUE,
+                                .provenance_context = NULL) {
     if (!inherits(cohort, "Cohort")) {
         stop("Input must be a Cohort object")
     }
+
+    provenance_call <- provenance_acquire_context(
+        output_data_dir, enabled = provenance, context = .provenance_context
+    )
+    provenance_context <- provenance_call$context
+    if (provenance_call$owns) on.exit(provenance_finish(provenance_context), add = TRUE)
 
     # Validate required columns exist
     jabba_column = Skilift::DEFAULT_JABBA(object = cohort)
@@ -251,7 +302,13 @@ lift_allelic_pp_fit <- function(cohort,
 
         #out_file <- file.path(pair_dir, "allelic_pp_fit.json")
         out_file_png <- file.path(pair_dir, file.name)
+        out_file_json <- gsub(".png", ".json", out_file_png)
+        staged_png <- if (save_png) provenance_stage_output(provenance_context, out_file_png) else NULL
+        staged_json <- if (save_data) provenance_stage_output(provenance_context, out_file_json) else NULL
 
+        input_bindings <- if (!is.null(provenance_context)) provenance_input_bindings(
+            row, c(graph = jabba_column, het_pileups = "het_pileups")
+        ) else list()
         futile.logger::flog.threshold("ERROR")
         tryCatchLog(
             {
@@ -265,15 +322,29 @@ lift_allelic_pp_fit <- function(cohort,
                         verbose = T) 
 
                 if(save_png){
-                    ggsave(file = out_file_png, plot = ppplot$plot, width = 6, height = 6, dpi = 300)
+                    ggsave(file = staged_png, plot = ppplot$plot, width = 6, height = 6, dpi = 300)
                 }
         
                 if(save_data){
-                    write_json(ppplot$data[seqnames %in% c(1:22, "X", "Y"), .(major.cn, minor.cn, jabba_cn, color)], gsub(".png", ".json", out_file_png), pretty = TRUE)
+                    write_json(ppplot$data[seqnames %in% c(1:22, "X", "Y"), .(major.cn, minor.cn, jabba_cn, color)], staged_json, pretty = TRUE)
+                }
+                if (!is.null(provenance_context)) {
+                    if (save_png) provenance_queue_output(
+                        provenance_context, as.character(row$pair), basename(out_file_png),
+                        "lift_allelic_pp_fit", input_bindings, staged_png, out_file_png
+                    )
+                    if (save_data) provenance_queue_output(
+                        provenance_context, as.character(row$pair), basename(out_file_json),
+                        "lift_allelic_pp_fit", input_bindings, staged_json, out_file_json
+                    )
                 }
                 
             },
             error = function(e) {
+                if (!is.null(provenance_context)) {
+                    if (!is.null(staged_png) && file.exists(staged_png)) unlink(staged_png)
+                    if (!is.null(staged_json) && file.exists(staged_json)) unlink(staged_json)
+                }
                 print(sprintf("Error processing %s: %s", row$pair, e$message))
                 NULL
             }
@@ -294,13 +365,23 @@ lift_allelic_pp_fit <- function(cohort,
 #' @param cohort Cohort object containing sample information
 #' @param output_data_dir Base directory for output files
 #' @param cores Number of cores for parallel processing (default: 1)
+#' @param provenance Enable per-Case provenance recording (default: TRUE).
+#' @param .provenance_context Internal shared per-run provenance collector.
 #' @export
 lift_multiplicity_fits <- function(cohort,
                                    output_data_dir,
-                                   cores = 1) {
+                                   cores = 1,
+                                   provenance = TRUE,
+                                   .provenance_context = NULL) {
     if (!inherits(cohort, "Cohort")) {
         stop("Input must be a Cohort object")
     }
+
+    provenance_call <- provenance_acquire_context(
+        output_data_dir, enabled = provenance, context = .provenance_context
+    )
+    provenance_context <- provenance_call$context
+    if (provenance_call$owns) on.exit(provenance_finish(provenance_context), add = TRUE)
 
     # Validate required columns exist
     required_cols <- c("pair", "multiplicity")
@@ -341,6 +422,14 @@ lift_multiplicity_fits <- function(cohort,
                 hetsnps_multiplicity = c("major_snv_copies", "minor_snv_copies")
             )
 
+            staged_outputs <- character()
+            inputs <- if (!is.null(provenance_context)) c(
+                provenance_input_bindings(row, stats::setNames(col, "multiplicity")),
+                provenance_direct_binding(
+                    system.file("extdata", "data", "maskA_re.rds", package = "Skilift"),
+                    "mask"
+                )
+            ) else list()
             futile.logger::flog.threshold("ERROR")
             tryCatchLog(
                 {
@@ -348,6 +437,9 @@ lift_multiplicity_fits <- function(cohort,
                     #     stop(sprintf("Multiplicity file not found for %s: %s is %s", row$pair, col, row[[col]]))
                     # }
 
+                    staged_outputs <- vapply(out_files, function(path) {
+                        provenance_stage_output(provenance_context, path)
+                    }, character(1))
                     mapply(function(out_file, field_to_use) {
                         process_multiplicity_fit(row[[col]],
                             field = field_to_use,
@@ -355,7 +447,20 @@ lift_multiplicity_fits <- function(cohort,
                             save_png = F,
                             save_html = F
                         )
-                    }, out_files, field_to_use)
+                    }, staged_outputs, field_to_use)
+                    if (!is.null(provenance_context)) {
+                        for (j in seq_along(out_files)) {
+                            provenance_queue_output(
+                                provenance_context,
+                                pair = as.character(row$pair),
+                                artifact_key = basename(out_files[[j]]),
+                                lifter = "lift_multiplicity_fits",
+                                inputs = inputs,
+                                staged_path = staged_outputs[[j]],
+                                final_path = out_files[[j]]
+                            )
+                        }
+                    }
 
                     # if(col == "hetsnps_multiplicity"){
                     #     zi_plot(row[[col]], out_file = file.path(pair_dir, "hetsnps_major_minor.png"))
@@ -363,6 +468,9 @@ lift_multiplicity_fits <- function(cohort,
 
                 },
                 error = function(e) {
+                    if (!is.null(provenance_context) && length(staged_outputs)) {
+                        unlink(staged_outputs[file.exists(staged_outputs)])
+                    }
                     print(sprintf("Error processing %s: %s", row$pair, e$message))
                 }
             )
@@ -1581,11 +1689,20 @@ create_2d_purity_ploidy = function(
 #' Lift 2d purity ploidy
 #' @author Kevin Hadi
 #' @author Aditya Deshpande
+#' @param provenance Enable per-Case provenance recording (default: TRUE).
+#' @param .provenance_context Internal shared per-run provenance collector.
 #' @export 
-lift_2d_purity_ploidy_plot <- function(cohort, output_data_dir, cores = 1) {
+lift_2d_purity_ploidy_plot <- function(cohort, output_data_dir, cores = 1,
+                                             provenance = TRUE, .provenance_context = NULL) {
     if (!inherits(cohort, "Cohort")) {
         stop("Input must be a Cohort object")
     }
+
+    provenance_call <- provenance_acquire_context(
+        output_data_dir, enabled = provenance, context = .provenance_context
+    )
+    provenance_context <- provenance_call$context
+    if (provenance_call$owns) on.exit(provenance_finish(provenance_context), add = TRUE)
 
     jabba_column = Skilift::DEFAULT_JABBA(object = cohort)
 
@@ -1597,6 +1714,7 @@ lift_2d_purity_ploidy_plot <- function(cohort, output_data_dir, cores = 1) {
         stop("Missing required columns in cohort: ", paste(missing_cols, collapse = ", "))
     }
     iterate_function = function(row, output_data_dir) {
+        staged_file <- NULL
         futile.logger::flog.threshold("ERROR")
         tryCatchLog(
             {
@@ -1606,13 +1724,38 @@ lift_2d_purity_ploidy_plot <- function(cohort, output_data_dir, cores = 1) {
                 }
                 pair = row$pair
                 filename = file.path(output_data_dir, row$pair, "multiplicity.png")
+                staged_file <- provenance_stage_output(provenance_context, filename)
+                inputs <- if (!is.null(provenance_context)) c(
+                    provenance_input_bindings(
+                        row,
+                        c(somatic_multiplicity = "multiplicity", hetsnps_multiplicity = "hetsnps_multiplicity")
+                    ),
+                    provenance_direct_binding(
+                        system.file("extdata", "data", "maskA_re.rds", package = "Skilift"),
+                        "mask"
+                    )
+                ) else list()
                 res_list = create_2d_purity_ploidy(row)
                 pg = res_list$cowplot_obj
-                grDevices::png(filename, height = 1000, width = 2000, pointsize = 12)
+                grDevices::png(staged_file, height = 1000, width = 2000, pointsize = 12)
                 print(pg)
                 grDevices::dev.off()
+                if (!is.null(provenance_context)) {
+                    provenance_queue_output(
+                        provenance_context,
+                        pair = as.character(row$pair),
+                        artifact_key = "multiplicity.png",
+                        lifter = "lift_2d_purity_ploidy_plot",
+                        inputs = inputs,
+                        staged_path = staged_file,
+                        final_path = filename
+                    )
+                }
                 return(invisible(NULL))
             }, error = function(e) {
+                if (!is.null(provenance_context) && !is.null(staged_file) && file.exists(staged_file)) {
+                    unlink(staged_file)
+                }
                 print(sprintf("Error processing %s: %s", row$pair, e$message))
             }
         )

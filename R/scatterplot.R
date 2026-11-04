@@ -267,13 +267,17 @@ subsample_hetsnps <- function(
 #' @param cohort Cohort object containing sample information
 #' @param output_data_dir Base directory for output files
 #' @param cores Number of cores for parallel processing (default: 1)
+#' @param provenance Enable per-Case provenance recording (default: TRUE).
+#' @param .provenance_context Internal shared per-run provenance collector.
 #' @param mask Logical indicating whether to mask the coverage data (default: TRUE)
 #' @return None
 #' @export
 lift_denoised_coverage <- function(
     cohort,
     output_data_dir,
-    cores = 1
+    cores = 1,
+    provenance = TRUE,
+    .provenance_context = NULL
 ) {
     if (!inherits(cohort, "Cohort")) {
         stop("Input must be a Cohort object")
@@ -281,6 +285,13 @@ lift_denoised_coverage <- function(
 
     if (!dir.exists(output_data_dir)) {
         dir.create(output_data_dir, recursive = TRUE)
+    }
+
+    owns_provenance_context <- is.null(.provenance_context) && isTRUE(provenance)
+    provenance_context <- .provenance_context
+    if (owns_provenance_context) {
+        provenance_context <- provenance_new_context(output_data_dir, enabled = TRUE)
+        on.exit(provenance_finish(provenance_context), add = TRUE)
     }
 
     # Validate required columns exist
@@ -300,11 +311,30 @@ lift_denoised_coverage <- function(
         }
 
         out_file <- file.path(pair_dir, "coverage.arrow")
+        staged_file <- NULL
+        input_bindings <- list()
 
         futile.logger::flog.threshold("ERROR")
         tryCatchLog(
             {
                 if (!is.null(row$tumor_coverage) && file.exists(row$tumor_coverage)) {
+                    if (!is.null(provenance_context)) {
+                        input_bindings <- c(
+                            provenance_input_bindings(row, c(coverage = "tumor_coverage")),
+                            provenance_direct_binding(
+                                Skilift:::default_settings_path, "reference_settings"
+                            )
+                        )
+                        if (isTRUE(as.logical(row$denoised_coverage_apply_mask))) {
+                            input_bindings <- c(
+                                input_bindings,
+                                provenance_direct_binding(
+                                    system.file("extdata", "data", "maskA_re.rds", package = "Skilift"),
+                                    "mask"
+                                )
+                            )
+                        }
+                    }
                     cov <- row$tumor_coverage %>% readRDS()
                     coverage_values = base::get(row$denoised_coverage_field, as.environment(as.list(mcols(cov))))
                     lst_cov_bool = Skilift::test_coverage_normalized(coverage_values)
@@ -328,14 +358,30 @@ lift_denoised_coverage <- function(
                         mask = row$denoised_coverage_apply_mask
                     )
 
-                    # Write arrow table
+                    # Write to a Case-local stage file so a failed provenance write
+                    # cannot replace the previously published coverage output.
+                    staged_file <- provenance_stage_output(provenance_context, out_file)
                     message(sprintf("Writing coverage arrow file for %s", row$pair))
-                    arrow::write_feather(arrow_table, out_file, compression = "uncompressed")
+                    arrow::write_feather(arrow_table, staged_file, compression = "uncompressed")
+                    if (!is.null(provenance_context)) {
+                        provenance_queue_output(
+                            provenance_context,
+                            pair = as.character(row$pair),
+                            artifact_key = "coverage.arrow",
+                            lifter = "lift_denoised_coverage",
+                            inputs = input_bindings,
+                            staged_path = staged_file,
+                            final_path = out_file
+                        )
+                    }
                 } else {
                     warning(sprintf("Tumor coverage file missing for %s", row$pair))
                 }
             },
             error = function(e) {
+                if (!is.null(provenance_context) && !is.null(staged_file) && file.exists(staged_file)) {
+                    unlink(staged_file)
+                }
                 print(sprintf("Error processing %s: %s", row$pair, e$message))
                 NULL
             }
@@ -353,9 +399,12 @@ lift_denoised_coverage <- function(
 #' @param cohort Cohort object containing sample information
 #' @param output_data_dir Base directory for output files
 #' @param cores Number of cores for parallel processing (default: 1)
+#' @param provenance Enable per-Case provenance recording (default: TRUE).
+#' @param .provenance_context Internal shared per-run provenance collector.
 #' @return None
 #' @export
-lift_hetsnps <- function(cohort, output_data_dir, cores = 1) {
+lift_hetsnps <- function(cohort, output_data_dir, cores = 1,
+                         provenance = TRUE, .provenance_context = NULL) {
     if (!inherits(cohort, "Cohort")) {
         stop("Input must be a Cohort object")
     }
@@ -363,6 +412,12 @@ lift_hetsnps <- function(cohort, output_data_dir, cores = 1) {
     if (!dir.exists(output_data_dir)) {
         dir.create(output_data_dir, recursive = TRUE)
     }
+
+    provenance_call <- provenance_acquire_context(
+        output_data_dir, enabled = provenance, context = .provenance_context
+    )
+    provenance_context <- provenance_call$context
+    if (provenance_call$owns) on.exit(provenance_finish(provenance_context), add = TRUE)
 
     # Validate required columns exist
     required_cols <- c("pair", "het_pileups")
@@ -381,11 +436,40 @@ lift_hetsnps <- function(cohort, output_data_dir, cores = 1) {
         }
 
         out_file <- file.path(pair_dir, "hetsnps.arrow")
+        staged_file <- NULL
+        input_bindings <- list()
 
         futile.logger::flog.threshold("ERROR")
         tryCatchLog(
             {
                 if (!is.null(row$het_pileups) && file.exists(row$het_pileups)) {
+                    if (!is.null(provenance_context)) {
+                        input_bindings <- c(
+                            provenance_input_bindings(row, c(het_pileups = "het_pileups")),
+                            provenance_direct_binding(
+                                Skilift:::default_settings_path, "reference_settings"
+                            ),
+                            provenance_direct_binding(
+                                system.file("extdata", "data", "maskA_re.rds", package = "Skilift"),
+                                "scatterplot_mask"
+                            )
+                        )
+                        filter_mask <- row$hetsnps_mask
+                        if (is.null(filter_mask) || !length(filter_mask) || is.na(filter_mask)) {
+                            input_bindings <- c(
+                                input_bindings,
+                                provenance_direct_binding(
+                                    system.file("extdata", "data", "maskA_re.rds", package = "Skilift"),
+                                    "filter_mask"
+                                )
+                            )
+                        } else {
+                            input_bindings <- c(
+                                input_bindings,
+                                provenance_input_bindings(row, c(filter_mask = "hetsnps_mask"))
+                            )
+                        }
+                    }
                     # Subsample hetsnps
                     hetsnps_gr <- subsample_hetsnps(
                         het_pileups = row$het_pileups,
@@ -413,14 +497,29 @@ lift_hetsnps <- function(cohort, output_data_dir, cores = 1) {
                         bin.width = row$hetsnps_bin_width
                     )
 
-                    # Write arrow table
+                    # Write to a Case-local stage file before publishing data and provenance.
+                    staged_file <- provenance_stage_output(provenance_context, out_file)
                     message(sprintf("Writing hetsnps arrow file for %s", row$pair))
-                    arrow::write_feather(arrow_table, out_file, compression = "uncompressed")
+                    arrow::write_feather(arrow_table, staged_file, compression = "uncompressed")
+                    if (!is.null(provenance_context)) {
+                        provenance_queue_output(
+                            provenance_context,
+                            pair = as.character(row$pair),
+                            artifact_key = "hetsnps.arrow",
+                            lifter = "lift_hetsnps",
+                            inputs = input_bindings,
+                            staged_path = staged_file,
+                            final_path = out_file
+                        )
+                    }
                 } else {
                     warning(sprintf("Het pileups file missing for %s", row$pair))
                 }
             },
             error = function(e) {
+                if (!is.null(provenance_context) && !is.null(staged_file) && file.exists(staged_file)) {
+                    unlink(staged_file)
+                }
                 print(sprintf("Error processing %s: %s", row$pair, e$message))
                 NULL
             }

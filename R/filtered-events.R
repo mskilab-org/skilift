@@ -2528,6 +2528,7 @@ create_oncotable <- function(
 #' @param jabba_gg JaBbA output ggraph or complex
 #' @param out_file path to write json
 #' @param return_table TRUE/FALSE whether to return the data.table
+#' @param hemedb_path Path to the Heme database used for Heme event filtering.
 #' @return data.table or NULL
 #' @export
 create_filtered_events <- function(
@@ -2537,7 +2538,8 @@ create_filtered_events <- function(
     out_file,
     return_table = FALSE,
     cohort_type = "paired",
-    additional_columns = NULL
+    additional_columns = NULL,
+    hemedb_path = Skilift:::HEMEDB()
     ) {
   ot <- readRDS(oncotable)
 
@@ -2976,7 +2978,7 @@ create_filtered_events <- function(
     res.final <- rbind(res.mut, res.cn.dt, res.fus, res.complex, fill = TRUE)
     res.final[, sample := pair]
     if (identical(cohort_type, "heme")) {
-      res.final <- select_heme_events(res.final)
+      res.final <- select_heme_events(res.final, hemedb_path = hemedb_path)
     }
     res.final$type = tools::toTitleCase(res.final$type)
     ### FIXME: REMOVING Y CHROMOSOME UNTIL WE UPDATE DRYCLEAN
@@ -3013,6 +3015,8 @@ create_filtered_events <- function(
 #' @param cohort Cohort object containing sample information
 #' @param output_data_dir Base directory for output files
 #' @param cores Number of cores for parallel processing (default: 1)
+#' @param provenance Enable per-Case provenance recording (default: TRUE).
+#' @param .provenance_context Internal shared per-run provenance collector.
 #' @return None
 #' @export
 lift_filtered_events <- function(
@@ -3024,7 +3028,9 @@ lift_filtered_events <- function(
   show_all_tags = FALSE,
   show_all_small_muts_tags = FALSE,
   show_all_cna_tags = FALSE,
-  show_all_svs_tags = FALSE
+  show_all_svs_tags = FALSE,
+  provenance = TRUE,
+  .provenance_context = NULL
 ) {
   if (!inherits(cohort, "Cohort")) {
       stop("Input must be a Cohort object")
@@ -3033,6 +3039,12 @@ lift_filtered_events <- function(
   if (!dir.exists(output_data_dir)) {
       dir.create(output_data_dir, recursive = TRUE)
   }
+
+  provenance_call <- provenance_acquire_context(
+    output_data_dir, enabled = provenance, context = .provenance_context
+  )
+  provenance_context <- provenance_call$context
+  if (provenance_call$owns) on.exit(provenance_finish(provenance_context), add = TRUE)
   
   # Validate required columns exist
   # required_cols <- c("pair", "oncotable", "jabba_gg")
@@ -3050,6 +3062,8 @@ lift_filtered_events <- function(
   }
     
   cohort_type = cohort$type
+  hemedb_path <- if (identical(cohort_type, "heme")) Skilift:::HEMEDB() else NULL
+  duncavage_path <- if (identical(cohort_type, "heme")) Skilift:::DUNCAVAGEDB() else NULL
   # Create a copy of the cohort to modify
   # Add oncotable column if it doesn't exist
   if (!"string_summary" %in% names(cohort$inputs)) {
@@ -3059,8 +3073,13 @@ lift_filtered_events <- function(
   # Process each sample in parallel
   futile.logger::flog.threshold("ERROR")
   iterate_fun = function(i) {
+    row <- cohort$inputs[i,]
+    state <- new.env(parent = emptyenv())
+    state$events_queued <- FALSE
+    state$highlights_queued <- FALSE
+    state$events_stage <- NULL
+    state$highlights_stage <- NULL
     main = function() {
-      row <- cohort$inputs[i,]
       pair_dir <- file.path(output_data_dir, row$pair)
       
       if (!dir.exists(pair_dir)) {
@@ -3069,7 +3088,26 @@ lift_filtered_events <- function(
       
       out_file <- file.path(pair_dir, "filtered.events.json")
       highlights_out_file <- file.path(pair_dir, "highlights.json")
+      state$events_stage <- provenance_stage_output(provenance_context, out_file)
+      state$highlights_stage <- if (identical(cohort_type, "heme")) {
+        provenance_stage_output(provenance_context, highlights_out_file)
+      } else NULL
 
+      source_inputs <- list()
+      input_bindings <- list()
+      if (!is.null(provenance_context)) {
+        source_inputs <- provenance_input_bindings(
+          row, c(oncotable = "oncotable", graph = jabba_column)
+        )
+        input_bindings <- c(
+          source_inputs,
+          provenance_direct_binding(
+            system.file("extdata", "data", "gene_locations.rds", package = "Skilift"),
+            "gene_locations"
+          ),
+          if (identical(cohort_type, "heme")) provenance_direct_binding(hemedb_path, "heme_database")
+        )
+      }
       out = NULL
       string_summary = ""
 
@@ -3077,19 +3115,52 @@ lift_filtered_events <- function(
         pair = row$pair,
         oncotable = row$oncotable,
         jabba_gg = row[[jabba_column]],
-        out_file = out_file,
+        out_file = state$events_stage,
         return_table = return_table,
         cohort_type = cohort_type,
-        additional_columns = additional_columns
+        additional_columns = additional_columns,
+        hemedb_path = hemedb_path
       )
+      if (!is.null(provenance_context) && file.exists(state$events_stage)) {
+        provenance_queue_output(
+          provenance_context,
+          pair = as.character(row$pair),
+          artifact_key = "filtered.events.json",
+          lifter = "lift_filtered_events",
+          inputs = input_bindings,
+          staged_path = state$events_stage,
+          final_path = out_file
+        )
+        state$events_queued <- TRUE
+      }
       if (identical(cohort_type, "heme")) {
+        highlight_inputs <- if (!is.null(provenance_context)) c(
+          source_inputs,
+          provenance_direct_binding(hemedb_path, "heme_database"),
+          provenance_direct_binding(duncavage_path, "duncavage_database"),
+          provenance_input_bindings(row, c(itdseek = "itdseek_rds"))
+        ) else list()
         create_heme_highlights(
           events_tbl = out,
           jabba_gg = row[[jabba_column]],
-          out_file = highlights_out_file,
+          out_file = state$highlights_stage,
+          hemedb_path = hemedb_path,
+          duncavage_path = duncavage_path,
           tumor_type = row$tumor_type,
           cohorttuple = row
         )
+        if (!is.null(provenance_context) && file.exists(state$highlights_stage)) {
+          provenance_queue_output(
+            provenance_context,
+            pair = as.character(row$pair),
+            artifact_key = "highlights.json",
+            lifter = "lift_filtered_events",
+            inputs = highlight_inputs,
+            staged_path = state$highlights_stage,
+            final_path = highlights_out_file
+          )
+          state$highlights_queued <- TRUE
+        }
       }
       string_summary = create_summary(
         events_tbl = out,
@@ -3110,6 +3181,14 @@ lift_filtered_events <- function(
     tryCatchLog({
       main()
     }, error = function(e) {
+      if (!is.null(provenance_context)) {
+        if (!isTRUE(state$events_queued) && !is.null(state$events_stage) && file.exists(state$events_stage)) {
+          unlink(state$events_stage)
+        }
+        if (!isTRUE(state$highlights_queued) && !is.null(state$highlights_stage) && file.exists(state$highlights_stage)) {
+          unlink(state$highlights_stage)
+        }
+      }
       print(sprintf("Error processing %s: %s", row$pair, e$message))
       NULL
     })

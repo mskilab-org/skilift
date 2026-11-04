@@ -127,6 +127,7 @@ has_required_columns <- function(cohort, columns, any = FALSE, verbose = TRUE) {
 #' @param output_data_dir Base directory for output files
 #' @param cores Number of cores for parallel processing (default: 1)
 #' @param ... Additional arguments
+#' @param provenance Enable per-Case provenance recording (default: TRUE).
 #'
 #' @return None
 #' @export
@@ -137,7 +138,8 @@ lift_all <- function(
     genome_length = NULL,
     width = 10000,
     gencode = Skilift::get_default_gencode(),
-    ...) {
+    ...,
+    provenance = TRUE) {
   
   list2env(list(...), envir = environment())
 
@@ -151,6 +153,15 @@ lift_all <- function(
     stop("output_data_dir is required")
   } else if (!dir.exists(output_data_dir)) {
     dir.create(output_data_dir, recursive = TRUE)
+  }
+
+  provenance_context <- if (isTRUE(provenance)) {
+    provenance_new_context(output_data_dir, enabled = TRUE)
+  } else {
+    NULL
+  }
+  if (!is.null(provenance_context)) {
+    on.exit(provenance_finish(provenance_context), add = TRUE)
   }
 
   if (!is.null(cohort$nextflow_results_path)) {
@@ -172,7 +183,9 @@ lift_all <- function(
       genome_length = genome_length,
       width = width,
       gencode = gencode,
-      ... = ...
+      ... = ...,
+      provenance = provenance,
+      .provenance_context = provenance_context
     )
   } else if (cohort$type == "heme") {
     cohort_mod = lift_heme(
@@ -183,7 +196,9 @@ lift_all <- function(
       genome_length = genome_length,
       width = width,
       gencode = gencode,
-      ... = ...
+      ... = ...,
+      provenance = provenance,
+      .provenance_context = provenance_context
     )
   } else if (cohort$type == "tumor_only") {
     cohort_mod = lift_tumor_only(
@@ -194,7 +209,9 @@ lift_all <- function(
       genome_length = genome_length,
       width = width,
       gencode = gencode,
-      ... = ...
+      ... = ...,
+      provenance = provenance,
+      .provenance_context = provenance_context
     )
   }
 
@@ -203,6 +220,13 @@ lift_all <- function(
     warning("Creating datafiles.json directory")
   }
 
+
+  if (!is.null(provenance_context)) {
+    provenance_finish(provenance_context)
+    if (isTRUE(provenance_context$metadata_attempted)) {
+      Skilift::lift_datafiles_json(output_data_dir = output_data_dir, cores = cores)
+    }
+  }
 
   Skilift:::staveRDS(
     cohort_mod,
@@ -229,6 +253,8 @@ lift_mvp <- function(
   ...
 ) {
   list2env(list(...), envir = environment())
+  provenance_enabled <- if (exists("provenance", inherits = FALSE)) isTRUE(provenance) else TRUE
+  provenance_context <- if (exists(".provenance_context", inherits = FALSE)) .provenance_context else NULL
 
   jabba_column = Skilift::DEFAULT_JABBA(object = cohort)
 
@@ -239,7 +265,9 @@ lift_mvp <- function(
           cohort = cohort,
           output_data_dir = output_data_dir,
           cores = cores,
-          is_allelic = FALSE
+          is_allelic = FALSE,
+          provenance = provenance_enabled,
+          .provenance_context = provenance_context
         )
     })
   }
@@ -251,7 +279,9 @@ lift_mvp <- function(
         cohort = cohort,
         output_data_dir = output_data_dir,
         cores = cores,
-        is_allelic = TRUE
+        is_allelic = TRUE,
+        provenance = provenance_enabled,
+        .provenance_context = provenance_context
       )
     })
   }
@@ -262,7 +292,9 @@ lift_mvp <- function(
       lift_denoised_coverage(
         cohort = cohort,
         output_data_dir = output_data_dir,
-        cores = cores
+        cores = cores,
+        provenance = provenance_enabled,
+        .provenance_context = provenance_context
       )
     })
   }
@@ -273,7 +305,9 @@ lift_mvp <- function(
       lift_hetsnps(
         cohort = cohort,
         output_data_dir = output_data_dir,
-        cores = cores
+        cores = cores,
+        provenance = provenance_enabled,
+        .provenance_context = provenance_context
       )
     })
   }
@@ -296,7 +330,9 @@ lift_mvp <- function(
       cohort <- lift_filtered_events(
         cohort = cohort,
         output_data_dir = output_data_dir,
-        cores = cores
+        cores = cores,
+        provenance = provenance_enabled,
+        .provenance_context = provenance_context
       )
     })
   }
@@ -319,7 +355,9 @@ lift_mvp <- function(
       lift_signatures(
         cohort = cohort,
         output_data_dir = output_data_dir,
-        cores = cores
+        cores = cores,
+        provenance = provenance_enabled,
+        .provenance_context = provenance_context
       )
     })
   }
@@ -330,7 +368,9 @@ lift_mvp <- function(
       lift_multiplicity(
         cohort = cohort,
         output_data_dir = output_data_dir,
-        cores = cores
+        cores = cores,
+        provenance = provenance_enabled,
+        .provenance_context = provenance_context
       )
     })
   }
@@ -341,7 +381,9 @@ lift_mvp <- function(
       lift_segment_width_distribution(
         cohort = cohort,
         output_data_dir = output_data_dir,
-        cores = cores
+        cores = cores,
+        provenance = provenance_enabled,
+        .provenance_context = provenance_context
       )
     })
   }
@@ -352,7 +394,9 @@ lift_mvp <- function(
       lift_variant_qc(
         cohort = cohort,
         output_data_dir = output_data_dir,
-        cores = cores
+        cores = cores,
+        provenance = provenance_enabled,
+        .provenance_context = provenance_context
       )
     })
   }
@@ -360,20 +404,26 @@ lift_mvp <- function(
   if (has_required_columns(cohort, Skilift:::required_columns$metadata, any = TRUE)) {
     Skilift::skimessage("Uploading metadata (tumor type, coverage, other QC, HRD score, MSI score, etc) for available fields via Skilift::lift_metadata()")
     Skilift::shutup({
+      if (!is.null(provenance_context)) provenance_context$metadata_attempted <- TRUE
       lift_metadata(
         cohort = cohort,
         output_data_dir = output_data_dir,
         cores = cores,
-        genome_length = genome_length
+        genome_length = genome_length,
+        do_lift_datafiles_json = is.null(provenance_context),
+        provenance = provenance_enabled,
+        .provenance_context = provenance_context
       )
     })
 
-    Skilift::skimessage("Generating datafiles.json via Skilift::lift_datafiles_json()")
-    Skilift::shutup({
-      lift_datafiles_json(
-        output_data_dir = output_data_dir
-      )
-    })
+    if (is.null(provenance_context)) {
+      Skilift::skimessage("Generating datafiles.json via Skilift::lift_datafiles_json()")
+      Skilift::shutup({
+        lift_datafiles_json(
+          output_data_dir = output_data_dir
+        )
+      })
+    }
   }
 
   # if (has_required_columns(cohort, required_columns$pp_plot)) {
@@ -393,7 +443,9 @@ lift_mvp <- function(
       lift_bam(
         cohort = cohort,
         output_data_dir = output_data_dir,
-        cores = cores
+        cores = cores,
+        provenance = provenance_enabled,
+        .provenance_context = provenance_context
       )
     })
   }
@@ -404,7 +456,9 @@ lift_mvp <- function(
       lift_multiplicity_fits(
         cohort,
         output_data_dir = output_data_dir,
-        cores = cores
+        cores = cores,
+        provenance = provenance_enabled,
+        .provenance_context = provenance_context
       )
     })
   }
@@ -427,7 +481,9 @@ lift_mvp <- function(
       lift_2d_purity_ploidy_plot(
         cohort = cohort,
         output_data_dir = output_data_dir,
-        cores = cores
+        cores = cores,
+        provenance = provenance_enabled,
+        .provenance_context = provenance_context
       )
     })
   }
@@ -449,7 +505,9 @@ lift_mvp <- function(
       lift_allelic_pp_fit(
         cohort = cohort,
         output_data_dir = output_data_dir,
-        cores = cores
+        cores = cores,
+        provenance = provenance_enabled,
+        .provenance_context = provenance_context
       )
     })
   }
@@ -472,6 +530,9 @@ lift_heme <- function(cohort, output_data_dir, oncotable_dir, cores, ...) {
 }
 
 lift_paired <- function(cohort, output_data_dir, oncotable_dir, cores, ...) {
+  dots <- list(...)
+  provenance_enabled <- if ("provenance" %in% names(dots)) isTRUE(dots$provenance) else TRUE
+  provenance_context <- dots$.provenance_context
   cohort <- lift_mvp(cohort, output_data_dir, oncotable_dir, cores, ...)
 
   if (has_required_columns(cohort, required_columns$germline_multiplicity)) {
@@ -481,7 +542,9 @@ lift_paired <- function(cohort, output_data_dir, oncotable_dir, cores, ...) {
         cohort = cohort,
         output_data_dir = output_data_dir,
         cores = cores,
-        is_germline = TRUE
+        is_germline = TRUE,
+        provenance = provenance_enabled,
+        .provenance_context = provenance_context
       )
     })
   }

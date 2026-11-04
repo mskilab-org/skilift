@@ -195,9 +195,12 @@ create_variant_qc = function(oncokb_path, multiplicity_path, sbs_path, indel_pat
 #' @param cohort Cohort object containing sample information
 #' @param output_data_dir Base directory for output files
 #' @param cores Number of cores for parallel processing (default: 1)
+#' @param provenance Enable per-Case provenance recording (default: TRUE).
+#' @param .provenance_context Internal shared per-run provenance collector.
 #' @return None
 #' @export
-lift_variant_qc <- function(cohort, output_data_dir, cores = 1) {
+lift_variant_qc <- function(cohort, output_data_dir, cores = 1,
+                            provenance = TRUE, .provenance_context = NULL) {
     if (!inherits(cohort, "Cohort")) {
         stop("Input must be a Cohort object")
     }
@@ -205,6 +208,12 @@ lift_variant_qc <- function(cohort, output_data_dir, cores = 1) {
     if (!dir.exists(output_data_dir)) {
         dir.create(output_data_dir, recursive = TRUE)
     }
+
+    provenance_call <- provenance_acquire_context(
+        output_data_dir, enabled = provenance, context = .provenance_context
+    )
+    provenance_context <- provenance_call$context
+    if (provenance_call$owns) on.exit(provenance_finish(provenance_context), add = TRUE)
     
     # Validate required columns exist
     if (any(!c("oncokb_snv", "multiplicity", "indel_post_prob_signatures", "sbs_post_prob_signatures") %in% names(cohort$inputs))) {
@@ -220,7 +229,17 @@ lift_variant_qc <- function(cohort, output_data_dir, cores = 1) {
             dir.create(pair_dir, recursive = TRUE)
         }
         
-        out_file <- file.path(pair_dir, "sage.qc.json")
+        artifact_key <- "sage.qc.json"
+        out_file <- file.path(pair_dir, artifact_key)
+        staged_file <- NULL
+        input_bindings <- if (!is.null(provenance_context)) provenance_input_bindings(
+            row,
+            c(
+                oncokb_snv = "oncokb_snv", multiplicity = "multiplicity",
+                sbs_post_prob_signatures = "sbs_post_prob_signatures",
+                indel_post_prob_signatures = "indel_post_prob_signatures"
+            )
+        ) else list()
         
         futile.logger::flog.threshold("ERROR")
         tryCatchLog({
@@ -232,9 +251,24 @@ lift_variant_qc <- function(cohort, output_data_dir, cores = 1) {
             indel_path = row$indel_post_prob_signatures,
             cohort_type = cohort$type
             )
-            # Write to JSON
-            jsonlite::write_json(qc_data, out_file, pretty = TRUE)
+            # Write to a Case-local stage file before publishing data and provenance.
+            staged_file <- provenance_stage_output(provenance_context, out_file)
+            jsonlite::write_json(qc_data, staged_file, pretty = TRUE)
+            if (!is.null(provenance_context)) {
+                provenance_queue_output(
+                    provenance_context,
+                    pair = as.character(row$pair),
+                    artifact_key = artifact_key,
+                    lifter = "lift_variant_qc",
+                    inputs = input_bindings,
+                    staged_path = staged_file,
+                    final_path = out_file
+                )
+            }
         }, error = function(e) {
+            if (!is.null(provenance_context) && !is.null(staged_file) && file.exists(staged_file)) {
+                unlink(staged_file)
+            }
             print(sprintf("Error processing %s: %s", row$pair, e$message))
         })
     }, mc.cores = cores, mc.preschedule = TRUE)

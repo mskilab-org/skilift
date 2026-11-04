@@ -9,7 +9,9 @@ lift_copy_number_graph(
   output_data_dir,
   settings = Skilift:::default_settings_path,
   is_allelic = FALSE,
-  cores = 1
+  cores = 1,
+  provenance = TRUE,
+  .provenance_context = NULL
 )
 }
 \arguments{
@@ -20,6 +22,10 @@ lift_copy_number_graph(
 \item{is_allelic}{Boolean indicating whether to process allelic (TRUE) or total (FALSE) copy number}
 
 \item{cores}{Number of cores for parallel processing (default: 1)}
+
+\item{provenance}{Enable per-Case provenance recording (default: TRUE).}
+
+\item{.provenance_context}{Internal shared per-run provenance collector. Do not set directly.}
 }
 \value{
 None

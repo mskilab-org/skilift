@@ -7,6 +7,8 @@
 #' @param output_data_dir Base directory for output files
 #' @param is_allelic Boolean indicating whether to process allelic (TRUE) or total (FALSE) copy number
 #' @param cores Number of cores for parallel processing (default: 1)
+#' @param provenance Enable per-Case provenance recording (default: TRUE).
+#' @param .provenance_context Internal shared per-run provenance collector.
 #' @return None
 #' @export
 lift_copy_number_graph <- function(
@@ -14,7 +16,9 @@ lift_copy_number_graph <- function(
     output_data_dir,
     settings = Skilift:::default_settings_path,
     is_allelic = FALSE,
-    cores = 1
+    cores = 1,
+    provenance = TRUE,
+    .provenance_context = NULL
 ) {
     if (!inherits(cohort, "Cohort")) {
         stop("Input must be a Cohort object")
@@ -23,6 +27,12 @@ lift_copy_number_graph <- function(
     if (!dir.exists(output_data_dir)) {
         dir.create(output_data_dir, recursive = TRUE)
     }
+
+    provenance_call <- provenance_acquire_context(
+        output_data_dir, enabled = provenance, context = .provenance_context
+    )
+    provenance_context <- provenance_call$context
+    if (provenance_call$owns) on.exit(provenance_finish(provenance_context), add = TRUE)
     
     # Determine which column to use based on is_allelic
     if (is_allelic) {
@@ -51,12 +61,20 @@ lift_copy_number_graph <- function(
         }
         
         out_file <- file.path(pair_dir, out_filename)
+        staged_file <- NULL
+        input_bindings <- list()
         
         futile.logger::flog.threshold("ERROR")
         tryCatchLog({
             ggraph_path <- row[[cn_column]]
             
             if (!is.null(ggraph_path) && file.exists(ggraph_path)) {
+                if (!is.null(provenance_context)) {
+                    input_bindings <- c(
+                        provenance_input_bindings(row, stats::setNames(cn_column, "graph")),
+                        provenance_direct_binding(settings, "settings")
+                    )
+                }
                 message(sprintf("Reading gGraph for %s", row$pair))
                 ggraph <- process_jabba(ggraph_path)
 
@@ -121,8 +139,9 @@ lift_copy_number_graph <- function(
                 if (is_nfields_still_empty) nfields_arg = NULL
                 
                 # if("col" %in% names(mcols(ggraph$nodes$gr))) "col" else NULL
+                staged_file <- provenance_stage_output(provenance_context, out_file)
                 params <- list(
-                    filename = out_file,
+                    filename = staged_file,
                     verbose = TRUE,
                     maxcn = row$copy_number_graph_max_cn,
                     # nfields = if("col" %in% names(mcols(ggraph$nodes$gr))) "col" else NULL,
@@ -135,10 +154,24 @@ lift_copy_number_graph <- function(
                 # Generate and write JSON
                 message(sprintf("Writing copy number graph JSON for %s", row$pair))
                 do.call(gGnome::refresh(ggraph.reduced)$json, params)
+                if (!is.null(provenance_context) && file.exists(staged_file)) {
+                    provenance_queue_output(
+                        provenance_context,
+                        pair = as.character(row$pair),
+                        artifact_key = out_filename,
+                        lifter = "lift_copy_number_graph",
+                        inputs = input_bindings,
+                        staged_path = staged_file,
+                        final_path = out_file
+                    )
+                }
             } else {
                 warning(sprintf("Copy number graph file missing for %s", row$pair))
             }
         }, error = function(e) {
+            if (!is.null(provenance_context) && !is.null(staged_file) && file.exists(staged_file)) {
+                unlink(staged_file)
+            }
             print(sprintf("Error processing %s: %s", row$pair, e$message))
         })
     }, mc.cores = cores, mc.preschedule = TRUE)

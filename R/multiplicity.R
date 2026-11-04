@@ -657,6 +657,8 @@ multiplicity_to_intervals <- function(
 #' @param is_germline Logical indicating if mutations are germline (default: FALSE)
 #' @param output_data_dir Base directory for output files
 #' @param cores Number of cores for parallel processing (default: 1)
+#' @param provenance Enable per-Case provenance recording (default: TRUE).
+#' @param .provenance_context Internal shared per-run provenance collector.
 #' @return None
 #' @export
 lift_multiplicity <- function(
@@ -669,7 +671,9 @@ lift_multiplicity <- function(
     cores = 1,
     custom_annotation_fields = list(
         "custom_field" = NULL
-    )
+    ),
+    provenance = TRUE,
+    .provenance_context = NULL
 ) {
     if (!inherits(cohort, "Cohort")) {
         stop("Input must be a Cohort object")
@@ -679,6 +683,12 @@ lift_multiplicity <- function(
         dir.create(output_data_dir, recursive = TRUE)
     }
     
+    provenance_call <- provenance_acquire_context(
+        output_data_dir, enabled = provenance, context = .provenance_context
+    )
+    provenance_context <- provenance_call$context
+    if (provenance_call$owns) on.exit(provenance_finish(provenance_context), add = TRUE)
+
     # Determine which column to use based on is_germline
     snv_cn_col <- if(is_germline) "germline_multiplicity" else "multiplicity"
 
@@ -705,14 +715,21 @@ lift_multiplicity <- function(
         }
         
         # Determine output filename based on is_germline
-        out_file <- file.path(
-            pair_dir,
-            if(is_germline) "germline_mutations.json" else "mutations.json"
-        )
+        artifact_key <- if (is_germline) "germline_mutations.json" else "mutations.json"
+        out_file <- file.path(pair_dir, artifact_key)
+        staged_file <- NULL
         
         snv_cn_path = row[[snv_cn_col]]
         oncokb_snv_path = NULL
         if (!is.null(oncokb_snv_col)) oncokb_snv_path = row[[oncokb_snv_col]]
+        input_bindings <- list()
+        if (!is.null(provenance_context)) {
+            input_columns <- stats::setNames(snv_cn_col, "multiplicity")
+            if (!is.null(oncokb_snv_col)) {
+                input_columns <- c(input_columns, stats::setNames(oncokb_snv_col, "oncokb_snv"))
+            }
+            input_bindings <- provenance_input_bindings(row, input_columns)
+        }
         futile.logger::flog.threshold("ERROR")
         tryCatchLog({
             # Create multiplicity data.table
@@ -736,16 +753,31 @@ lift_multiplicity <- function(
                 cohort_type = cohort$type
             )
             
-            # Write to JSON
+            # Write to a Case-local stage file before publishing data and provenance.
+            staged_file <- provenance_stage_output(provenance_context, out_file)
             jsonlite::write_json(
                 intervals_list,
-                out_file,
+                staged_file,
                 pretty = TRUE,
                 auto_unbox = TRUE,
                 digits = 4
             )
+            if (!is.null(provenance_context)) {
+                provenance_queue_output(
+                    provenance_context,
+                    pair = as.character(row$pair),
+                    artifact_key = artifact_key,
+                    lifter = "lift_multiplicity",
+                    inputs = input_bindings,
+                    staged_path = staged_file,
+                    final_path = out_file
+                )
+            }
             
         }, error = function(e) {
+            if (!is.null(provenance_context) && !is.null(staged_file) && file.exists(staged_file)) {
+                unlink(staged_file)
+            }
             print(sprintf("Error processing %s: %s", row$pair, e$message))
             NULL
         })

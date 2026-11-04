@@ -10,7 +10,9 @@ lift_allelic_pp_fit(
   cores = 1,
   save_png = TRUE,
   save_data = TRUE,
-  file.name = "hetsnps_major_minor.png"
+  file.name = "hetsnps_major_minor.png",
+  provenance = TRUE,
+  .provenance_context = NULL
 )
 }
 \arguments{
@@ -21,6 +23,10 @@ lift_allelic_pp_fit(
 \item{cores}{Number of cores for parallel processing (default: 1)}
 
 \item{file.name}{Name of the output file (default: "hetsnps_major_minor.png")}
+
+\item{provenance}{Enable per-Case provenance recording (default: TRUE).}
+
+\item{.provenance_context}{Internal shared per-run provenance collector. Do not set directly.}
 }
 \description{
 This function will create PNG files for allelic ploidy/purity fits
