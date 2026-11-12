@@ -47,7 +47,9 @@ create_metadata(
   conpair_concordance = NULL,
   cohort_type = NULL,
   qc_flags_config = NULL,
-  added_field_values = NULL
+  added_field_values = NULL,
+  qc_merged = NULL,
+  qc_sample_key = pair
 )
 }
 \arguments{
@@ -102,6 +104,11 @@ create_metadata(
 \item{seqnames_loh}{Sequence names for loss of heterozygosity.}
 
 \item{seqnames_genome_width_or_genome_length}{Sequence names and genome width in list or genome length as a numeric}
+
+\item{qc_merged}{Optional path to sample-keyed merged QC JSON. When omitted,
+legacy metadata behavior is unchanged.}
+
+\item{qc_sample_key}{Record key in qc_merged; defaults to pair.}
 
 \item{wgs_metrics}{Path to the wgs_metrics file.}
 
