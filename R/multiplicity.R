@@ -181,6 +181,18 @@ create_multiplicity <- function(
         message("Successfully loaded input snv_cn.")
     }
 
+    mutations.gr = (
+      function(x) {
+        out = x[
+          S4Vectors::`%in%`(
+            GenomeInfoDb::seqnames(x),
+            GenomeInfoDb::standardChromosomes(x)
+          )
+        ]
+        return(out)
+      }
+    )(mutations.gr)
+
     mcols(mutations.gr)$snpeff_annotation = mutations.gr$annotation
     annotationsplit = strsplit(mcols(mutations.gr)$snpeff_annotation, "&")
     annotationsplit = Skilift:::dunlist(annotationsplit)
@@ -190,6 +202,7 @@ create_multiplicity <- function(
     # Normalize everything to just the 1st variant
     # type that appears if we get
     # splice&intron_variant nonsense.
+    
     mcols(mutations.gr)$snpeff_annotation = annotationsplit[ix == 1]$V1
     rm("annotationsplit")
 
@@ -239,18 +252,19 @@ create_multiplicity <- function(
 
         is_data_frame = inherits(oncokb_snv, "data.frame")
         if (is_data_frame) {
-        oncokb_snv_tmp = tryCatch(
-            {
-            dt2gr(oncokb_snv)
-            }, error = function(e) tryCatch(
-            {
-            as(oncokb_snv, "GRanges")
-            }, error = function(e) NULL)
-        )
-        if (is.null(oncokb_snv_tmp)) {
-            stop("oncokb_snv must be coercible to GRanges")
-        }
-        oncokb_snv = oncokb_snv_tmp
+            oncokb_snv = Skilift:::parse_oncokb_tier(oncokb_snv)
+            oncokb_snv_tmp = tryCatch(
+                {
+                    dt2gr(oncokb_snv)
+                }, error = function(e) tryCatch(
+                {
+                    as(oncokb_snv, "GRanges")
+                }, error = function(e) NULL)
+            )
+            if (is.null(oncokb_snv_tmp)) {
+                stop("oncokb_snv must be coercible to GRanges")
+            }
+            oncokb_snv = oncokb_snv_tmp
         }
         if (!inherits(oncokb_snv, "GRanges")) {
         stop("final oncokb_snv not a GRanges object")
@@ -277,10 +291,10 @@ create_multiplicity <- function(
     is_oncokb_present_and_populated = !is_null_oncokb_snv && !is_oncokb_snv_empty
     if (is_oncokb_present_and_populated) {
         oncokb.mutations.gr.annotated = merge_oncokb_multiplicity(
-        oncokb_snv,
-        mutations.gr,
-        overwrite = TRUE,
-        other.cols.keep = c("snpeff_annotation")
+            oncokb_snv,
+            mutations.gr,
+            overwrite = TRUE,
+            other.cols.keep = c("snpeff_annotation")
         )
 
         
@@ -668,7 +682,7 @@ lift_multiplicity <- function(
     show_only_oncokb = TRUE,
     cores = 1,
     custom_annotation_fields = list(
-        "custom_field" = NULL
+        "REPORTED" = "Reported"
     )
 ) {
     if (!inherits(cohort, "Cohort")) {
@@ -722,9 +736,7 @@ lift_multiplicity <- function(
                 is_germline = is_germline,
                 field = field,
                 show_only_oncokb = show_only_oncokb,
-                custom_annotation_fields = list(
-                    "REPORTED" = "Reported"
-                )
+                custom_annotation_fields = custom_annotation_fields
             )
             
             # Convert to intervals

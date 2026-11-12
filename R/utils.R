@@ -1,3 +1,13 @@
+#' Elvis operator
+#' 
+#' Elvis operator for default values.
+#' 
+#' @author Kevin Hadi
+#' @export
+`%|||%` = function(x, y) {
+  if (NROW(x) == 0 || all(is.na(x))) y else x
+}
+
 timestamp = function() {
     return(gsub("[\\:\\-]", "", gsub("\\s", "_", Sys.time())))
 }
@@ -1403,3 +1413,160 @@ default_s7_ggplot2_margin = function() {
     )
 }
 
+#' Generic coverage parser
+#' 
+#' Read any coverage file or object 
+#' 
+#' @author GPT 5.4 + Kevin Hadi
+read_coverage_any <- function(tumor_coverage) {
+    as_cov_granges <- function(x) {
+        if (inherits(x, "GRanges")) {
+            return(x)
+        }
+
+        node_gr <- tryCatch(x$nodes$gr, error = function(e) NULL)
+        if (!is.null(node_gr) && inherits(node_gr, "GRanges")) {
+            return(node_gr)
+        }
+
+        if (is.data.frame(x) || data.table::is.data.table(x)) {
+            return(gUtils::dt2gr(data.table::as.data.table(x)))
+        }
+
+        NULL
+    }
+
+    if (is.null(tumor_coverage)) {
+        stop("Please provide a valid path to a coverage file.")
+    }
+
+    if (!is.character(tumor_coverage)) {
+        cov <- as_cov_granges(tumor_coverage)
+        if (is.null(cov)) {
+            stop("tumor_coverage must be a GRanges or a GRanges-compatible object.")
+        }
+        return(cov)
+    }
+
+    text_try <- tryCatch(
+        {
+            out <- gGnome:::readCov(tumor_coverage)
+            cov <- as_cov_granges(out)
+            if (is.null(cov)) {
+                stop("Text coverage parser did not return coverage GRanges")
+            }
+            cov
+        },
+        error = function(e) e
+    )
+    if (!inherits(text_try, "error")) {
+        return(text_try)
+    }
+
+    rds_try <- tryCatch(
+        {
+            out <- readRDS(tumor_coverage)
+            cov <- as_cov_granges(out)
+            if (is.null(cov)) {
+                stop("RDS parser did not return a GRanges-compatible coverage object")
+            }
+            cov
+        },
+        error = function(e) e
+    )
+    if (!inherits(rds_try, "error")) {
+        return(rds_try)
+    }
+
+    stop(
+        paste0(
+            "Could not parse coverage file with JaBbA, text, or RDS readers. ",
+            "Text error: ", conditionMessage(text_try), "; ",
+            "RDS error: ", conditionMessage(rds_try)
+        )
+    )
+}
+
+
+#' Generic segmentation parser
+#' 
+#' Read any segmentation file or object 
+#' 
+#' @author GPT 5.4 + Kevin Hadi
+load_segmentation_any <- function(seg_path) {
+  ## Try multiple segmentation readers so jabba_path can be a JaBbA gGraph,
+  ## a generic RDS, or a text file coercible to GRanges via gUtils::dt2gr().
+  as_seg_granges <- function(x) {
+    if (inherits(x, "GRanges")) {
+      return(x)
+    }
+    node_gr <- tryCatch(x$nodes$gr, error = function(e) NULL)
+    if (!is.null(node_gr) && inherits(node_gr, "GRanges")) {
+      return(node_gr)
+    }
+    if (is.data.frame(x) || data.table::is.data.table(x)) {
+      return(gUtils::dt2gr(data.table::as.data.table(x)))
+    }
+    NULL
+  }
+
+  jabba_try <- tryCatch(
+    {
+      jab <- Skilift:::process_jabba(seg_path)
+      seg_gr <- as_seg_granges(jab)
+      if (is.null(seg_gr)) {
+        stop("JaBbA parser succeeded but did not return segmentation GRanges")
+      }
+      list(seg_gr = seg_gr, pp_source = jab, segstats_source = jab)
+    },
+    error = function(e) e
+  )
+  if (!inherits(jabba_try, "error")) {
+    return(jabba_try)
+  }
+
+  rds_try <- tryCatch(
+    {
+      out <- readRDS(seg_path)
+      seg_gr <- as_seg_granges(out)
+      if (is.null(seg_gr)) {
+        stop("RDS parser did not return a GRanges-compatible segmentation object")
+      }
+      pp_source <- tryCatch({
+        if (!is.null(out$purity) || !is.null(out$ploidy) || !is.null(out$meta)) out else NULL
+      }, error = function(e) NULL)
+      segstats_source <- tryCatch({
+        if (!is.null(out$nodes$dt)) out else NULL
+      }, error = function(e) NULL)
+      list(seg_gr = seg_gr, pp_source = pp_source, segstats_source = segstats_source)
+    },
+    error = function(e) e
+  )
+  if (!inherits(rds_try, "error")) {
+    return(rds_try)
+  }
+
+  text_try <- tryCatch(
+    {
+      seg_dt <- data.table::fread(seg_path)
+      list(
+        seg_gr = gUtils::dt2gr(seg_dt),
+        pp_source = NULL,
+        segstats_source = NULL
+      )
+    },
+    error = function(e) e
+  )
+  if (!inherits(text_try, "error")) {
+    return(text_try)
+  }
+
+  stop(
+    paste0(
+      "Could not parse segmentation file with JaBbA, RDS, or text readers. ",
+      "JaBbA error: ", conditionMessage(jabba_try), "; ",
+      "RDS error: ", conditionMessage(rds_try), "; ",
+      "Text error: ", conditionMessage(text_try)
+    )
+  )
+}

@@ -83,6 +83,8 @@ extract_pp <- function(jab) {
   list(purity = as.numeric(p), ploidy = as.numeric(pl))
 }
 
+
+
 AUTOSOME_NAMES <- c(as.character(1:22), paste0("chr", 1:22))
 
 # ── UI ────────────────────────────────────────────────────────────────────────
@@ -201,19 +203,32 @@ server <- function(input, output, session) {
     withCallingHandlers(
       tryCatch({
         if (!file.exists(jabba_path))
-          stop("JaBbA file not found: ", jabba_path)
+          stop("Segmentation file not found: ", jabba_path)
         if (!file.exists(coverage_path))
           stop("Coverage file not found: ", coverage_path)
 
-        jab <- Skilift:::process_jabba(jabba_path)
-        pp  <- extract_pp(jab)
+        seg_input <- Skilift:::load_segmentation_any(jabba_path)
+        seg_gr <- seg_input$seg_gr
+        pp <- if (!is.null(seg_input$pp_source)) {
+          extract_pp(seg_input$pp_source)
+        } else {
+          list(purity = NA_real_, ploidy = NA_real_)
+        }
 
         colnames_check <- c("mean", "sd", "var", "nbins_ok",
                             "nbins_nafrac", "raw_mean", "raw_var")
-        has_segstats <- all(colnames_check %in% names(jab$nodes$dt))
+        segstats_source_dt <- tryCatch(
+          seg_input$segstats_source$nodes$dt,
+          error = function(e) NULL
+        )
+        if (is.null(segstats_source_dt)) {
+          segstats_source_dt <- tryCatch(gUtils::gr2dt(seg_gr), error = function(e) NULL)
+        }
+        has_segstats <- !is.null(segstats_source_dt) &&
+          all(colnames_check %in% names(segstats_source_dt))
 
         if (has_segstats) {
-          segstats_dt <- jab$nodes$dt
+          segstats_dt <- segstats_source_dt
           mu   <- segstats_dt$mean
           w    <- as.numeric(segstats_dt$width)
           mu[is.infinite(mu)] <- NA
@@ -222,9 +237,8 @@ server <- function(input, output, session) {
           mutl <- sum(mu * w, na.rm = TRUE)
           segstats_dt[, mean := mu * (sw / mutl)]
         } else {
-
           segstats_dt <- Skilift::get_segstats(
-                                    balanced_jabba_gg = jabba_path,
+                                    balanced_jabba_gg = seg_gr,
                                     tumor_coverage    = coverage_path,
                                     coverage_field    = cov_field
                                   )

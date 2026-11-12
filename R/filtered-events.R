@@ -1017,7 +1017,7 @@ collect_oncokb_cna <- function(oncokb_cna, jabba_gg, pge, amp.thresh, del.thresh
         & scna$type == match_lst[2]
         & scna$type == "amp"
       ) | (
-        scna$exon_frac > 0
+        scna$exon_frac > 0 ## FIXME: Too sensitive for noisy/hypersegmented samples (i.e. low purity/bad fits)
         & scna$type == match_lst[2]
         & scna$type == "homdel"
       ),
@@ -1145,8 +1145,8 @@ collect_oncokb_fusions <- function(oncokb_fusions, pge, cytoband, verbose = TRUE
       ## grA <- pge[ixA[!is_na_A]]
       ## grB <- pge[ixB[!is_na_B]]
       coordB = coordA = character(NROW(non_silent_fusions))
-      coordA[!is_na_A] <- gUtils::gr.string(grA)
-      coordB[!is_na_B] <- gUtils::gr.string(grB)
+      coordA[!is_na_A] <- gUtils::gr.string(grA_gene)
+      coordB[!is_na_B] <- gUtils::gr.string(grB_gene)
     } else {
       na.index = integer(0)      
       bp5p_grl = gUtils::parse.grl(
@@ -1543,6 +1543,7 @@ parse_oncokb_tier <- function(
 maf_reconstruct_refalt = function(dt) {
   is_ins = which(dt$Variant_Type == "INS")
   is_del = which(dt$Variant_Type == "DEL")
+  is_snp = which(dt$Variant_Type == "SNP")
   clean_maf_allele = gsub("-", "", dt$Allele)
   clean_maf_ref = gsub("-", "", dt$Reference_Allele)
   fbp = dt$flanking_bps
@@ -1552,7 +1553,7 @@ maf_reconstruct_refalt = function(dt) {
     substring(fbp, 2, nchar(fbp) - 1),
     clean_maf_ref
   )
-  is_xnp = which(nchar(clean_maf_allele) == nchar(clean_maf_ref))
+  is_xnp = setdiff(which(nchar(clean_maf_allele) == nchar(clean_maf_ref)), c(is_ins, is_del))
   is_other = setdiff(seq_len(NROW(dt)), c(is_ins, is_del, is_xnp))
   vcf_ref_reconstructed = unflanked_bps
   ## vcf_ref_reconstructed = character(NROW(dt))
@@ -1566,7 +1567,7 @@ maf_reconstruct_refalt = function(dt) {
   vcf_alt_reconstructed = character(NROW(dt))
   vcf_alt_reconstructed[is_ins] = clean_maf_allele[is_ins]
   vcf_alt_reconstructed[is_del] = clean_maf_allele[is_del]
-  vcf_alt_reconstructed[is_xnp] = clean_maf_allele[is_xnp]
+  vcf_alt_reconstructed[is_xnp] = dt[is_xnp]$Tumor_Seq_Allele2
   return(
     list(
       vcf_ref_reconstructed = vcf_ref_reconstructed,
@@ -1603,9 +1604,9 @@ collect_oncokb <- function(oncokb_maf, multiplicity = NA_character_, verbose = T
     is_multiplicity_populated = NROW(multiplicity) > 0
   }
 
-  if (is_oncokb_populated && !is_multiplicity_populated) {
-    stop("Something's off - oncokb is populated with variants, but not multiplicity.")
-  }
+  # if (is_oncokb_populated && !is_multiplicity_populated) {
+  #   stop("Something's off - oncokb is populated with variants, but not multiplicity.")
+  # }
   
   if (is_oncokb_populated && is_multiplicity_populated) {
     oncokb = oncokb[
@@ -1701,6 +1702,39 @@ collect_oncokb <- function(oncokb_maf, multiplicity = NA_character_, verbose = T
           if (!exists("minor.count", where = ENV)) {
             minor.count = NA_real_
           }
+          if (!exists("major_snv_copies", where = ENV)) {
+            major_snv_copies = NA_real_
+          }
+          if (!exists("minor_snv_copies", where = ENV)) {
+            minor_snv_copies = NA_real_
+          }
+          if (!exists("altered_copies", where = ENV)) {
+            altered_copies = NA_real_
+          }
+          if (!exists("segment_cn", where = ENV)) {
+            segment_cn = NA_real_
+          }
+          if (
+              !exists("ref", mode = "character", where = ENV)
+              && !exists("ref", mode = "numeric", where = ENV)
+          ) {
+            ref = NA_real_
+          }
+          if (
+              !exists("alt", mode = "character", where = ENV)
+              && !exists("alt", mode = "numeric", where = ENV)
+          ) {
+            alt = NA_real_
+          }
+          if (
+            !exists("VAF", mode = "character", where = ENV)
+            && !exists("VAF", mode = "numeric", where = ENV)
+          ) {
+            VAF = alt / (ref + alt)
+          }
+          if (!exists("is_multi_hit_per_gene", mode = "character", where = ENV)) {
+            is_multi_hit_per_gene = NA
+          }
           out = list(
             gene = Hugo_Symbol,
             gene_summary = GENE_SUMMARY,
@@ -1738,7 +1772,23 @@ collect_oncokb <- function(oncokb_maf, multiplicity = NA_character_, verbose = T
             vcf_pos = vcf_pos,
             Tumor_Seq_Allele2 = Tumor_Seq_Allele2,
             vcf_ref = vcf_ref,
-            vcf_alt = vcf_alt
+            vcf_alt = vcf_alt,
+            ## transcript_id: prefer MAF Transcript_ID, fall back to Feature.
+            ## Both are populated by the upstream OncoKB annotator from the
+            ## snpEff-derived transcript (e.g. "NM_022552.4").
+            transcript_id = {
+              tx_id_col <- if (exists("Transcript_ID", where = ENV)) {
+                as.character(Transcript_ID)
+              } else {
+                rep(NA_character_, length(Hugo_Symbol))
+              }
+              feature_col <- if (exists("Feature", where = ENV)) {
+                as.character(Feature)
+              } else {
+                rep(NA_character_, length(Hugo_Symbol))
+              }
+              ifelse(!is.na(tx_id_col) & nzchar(tx_id_col), tx_id_col, feature_col)
+            }
           )
           return(out)
         }
@@ -1852,7 +1902,49 @@ annotation_template = list(
   )
 )
 
-    
+## Shared "missing" sentinel for per-variant annotation fields
+## (AlphaMissense, SIFT, Polyphen2_HVAR, Clinvar, and any future field
+## built the same way). Centralizing this here means every field treats
+## missingness identically: a missing row serializes as an empty object
+## ({}) rather than an explicit string like "Missing" or "Not in Clinvar".
+## Real annotations (e.g. "Ambiguous", "Conflicting pathogenicity",
+## "Not Cancer Related") are NOT missing and must not be listed here.
+MISSING_PRED_TOKENS = c("MISSING", ".", "UNKNOWN")
+MISSING_DESCS = c("Missing", "Not in Clinvar")
+
+#' @title emit_annotation_field
+#' @description
+#' Build the `tlst`-shaped list-column used by `parse_echtvar_oncotable()`
+#' for a single per-variant annotation field (e.g. AlphaMissense, SIFT,
+#' Polyphen2_HVAR, Clinvar). Rows flagged by `is_missing_row` are emitted
+#' as an empty list (which downstream serializes to `{}`); all other rows
+#' are emitted as a populated list of their `dt` columns.
+#'
+#' @param dt data.table with an `IX` row index and the field's columns
+#'   (e.g. class/score/desc), optionally including helper columns to drop
+#'   via `drop_cols` (these are not part of the emitted annotation object).
+#' @param is_missing_row logical vector, one entry per row of `dt`,
+#'   TRUE where the row should be treated as missing (-> `{}`).
+#' @param drop_cols character vector of helper column names to exclude
+#'   from the emitted object (e.g. "is_snv").
+emit_annotation_field = function(dt, is_missing_row, drop_cols = character(0)) {
+  dt = Skilift::copy(dt)
+  dt[, IX := seq_len(.N)]
+  dt[, IS_MISSING := is_missing_row]
+  emit_cols = setdiff(names(dt), c("IX", "IS_MISSING", drop_cols))
+  tlst = dt[,
+    {
+      main = function() {
+        if (IS_MISSING) return(list(dt = list(list())))
+        out = .SD[, emit_cols, with = FALSE]
+        return(list(dt = list(list(as.list(out)))))
+      }
+      main()
+    },
+    by = IX
+  ]
+  return(tlst)
+}
 
 parse_echtvar_oncotable = function(ot) {
   if (!Skilift:::is_oncotable_echtvar_annotated(ot)) return(ot)
@@ -1863,8 +1955,8 @@ parse_echtvar_oncotable = function(ot) {
   is_benign_onc_clinvar = grepl("benign", ot$clinvar_ONC, ignore.case = TRUE)
   is_pathogenic_onc_clinvar = grepl("pathogenic", ot$clinvar_ONC, ignore.case = TRUE)
   is_missing = (
-      ot$clinvar_ONC %in% c("MISSING", "UNKNOWN", ".")
-      & ot$clinvar_CLNDN %in% c("MISSING", "UNKNOWN", ".")
+      ot$clinvar_ONC %in% MISSING_PRED_TOKENS
+      & ot$clinvar_CLNDN %in% MISSING_PRED_TOKENS
   )
   is_cancer_related = grepl(
     glue::glue(
@@ -1918,14 +2010,19 @@ parse_echtvar_oncotable = function(ot) {
 
 
 
+  is_missing_clinvar = (
+    is_missing
+    | selection_string %in% MISSING_DESCS
+    | is.na(selection_string)
+  )
+
   clinvar_dt = data.table(
     # title = "Clinvar",
     class = code,
     score = -1,
     desc = selection_string
   )
-  clinvar_dt[, IX := seq_len(.N)]
-  tlst_clinvar = clinvar_dt[, list(dt = list(list(as.list(.SD)))), by = IX]
+  tlst_clinvar = emit_annotation_field(clinvar_dt, is_missing_clinvar)
 
   ncref = nchar(ot$vcf_ref)
   ncalt = nchar(ot$vcf_alt)
@@ -1946,8 +2043,7 @@ parse_echtvar_oncotable = function(ot) {
     "B" = "Benign",
     "LB" = "Likely Benign",
     "A" = "Ambiguous",
-    "MISSING" = "Missing",
-    "." = "Missing"
+    setNames(rep("Missing", length(MISSING_PRED_TOKENS)), MISSING_PRED_TOKENS)
   )[ot$dbNSFP_AlphaMissense_pred]
 
   code = data.table::fcase(
@@ -1957,33 +2053,26 @@ parse_echtvar_oncotable = function(ot) {
     default = "na"
   )
   
+  is_missing_am = (
+    !is_snv
+    | am_pred %in% MISSING_DESCS
+    | is.na(am_pred)
+  )
+
   am_dt = data.table(
     # title = "AlphaMissense",
     class = code,
     score = ot$dbNSFP_AlphaMissense_score,
-    desc = am_pred,
-    is_snv = is_snv
+    desc = am_pred
   )
 
-  am_dt[, IX := seq_len(.N)]
-
-  tlst_am = am_dt[,
-  {
-    ENV = environment()
-    main = function() {
-      if (!is_snv) return(list(dt = list(list())))
-      out = .SD[, -c("is_snv")]
-      return(list(dt = list(list(as.list(out)))))
-    }
-    main()
-  },  by = IX ]
+  tlst_am = emit_annotation_field(am_dt, is_missing_am)
 
   ## SIFT
   sift_pred = c(
     "T" = "Tolerated",
     "D" = "Damaging",
-    "MISSING" = "Missing",
-    "." = "Missing"
+    setNames(rep("Missing", length(MISSING_PRED_TOKENS)), MISSING_PRED_TOKENS)
   )[ot$dbNSFP_SIFT_pred]
 
   code = data.table::fcase(
@@ -1993,63 +2082,50 @@ parse_echtvar_oncotable = function(ot) {
     default = "na"
   )
   
+  is_missing_sift = (
+    !is_snv
+    | sift_pred %in% MISSING_DESCS
+    | is.na(sift_pred)
+  )
+
   sift_dt = data.table(
     # title = "SIFT",
     class = code,
     score = ot$dbNSFP_SIFT_score,
-    desc = sift_pred,
-    is_snv = is_snv
+    desc = sift_pred
   )
 
-  sift_dt[, IX := seq_len(.N)]
-
-  tlst_sift = sift_dt[,
-  {
-    ENV = environment()
-    main = function() {
-      if (!is_snv) return(list(dt = list(list())))
-      out = .SD[, -c("is_snv")]
-      return(list(dt = list(list(as.list(out)))))
-    }
-    main()
-  },  by = IX ]
+  tlst_sift = emit_annotation_field(sift_dt, is_missing_sift)
 
   ## Polyphen2
   pphen_pred = c(
     "B" = "Benign",
     "D" = "Damaging",
     "P" = "Likely Damaging",
-    "MISSING" = "Missing",
-    "." = "Missing"
+    setNames(rep("Missing", length(MISSING_PRED_TOKENS)), MISSING_PRED_TOKENS)
   )[ot$dbNSFP_Polyphen2_HVAR_pred]
 
   code = data.table::fcase(
-    !vtype == "SNV", "missing",
+    !vtype == "SNV", "na",
     grepl("damaging", pphen_pred, ignore.case = TRUE), "pathogenic",
     pphen_pred == "Benign", "benign",
     default = "na"
   )
   
+  is_missing_pphen = (
+    !is_snv
+    | pphen_pred %in% MISSING_DESCS
+    | is.na(pphen_pred)
+  )
+
   pphen_dt = data.table(
     # title = "Polyphen2 HVAR",
     class = code,
     score = ot$dbNSFP_Polyphen2_HVAR_score,
-    desc = pphen_pred,
-    is_snv = is_snv
+    desc = pphen_pred
   )
 
-  pphen_dt[, IX := seq_len(.N)]
-
-  tlst_pphen = pphen_dt[,
-  {
-    ENV = environment()
-    main = function() {
-      if (!is_snv) return(list(dt = list(list())))
-      out = .SD[, -c("is_snv")]
-      return(list(dt = list(list(as.list(out)))))
-    }
-    main()
-  },  by = IX ]
+  tlst_pphen = emit_annotation_field(pphen_dt, is_missing_pphen)
 
 
   tlst_mg = Reduce(
@@ -2528,6 +2604,7 @@ create_oncotable <- function(
 #' @param jabba_gg JaBbA output ggraph or complex
 #' @param out_file path to write json
 #' @param return_table TRUE/FALSE whether to return the data.table
+#' @param fusion_coord_padding bp padding added to each side of each fusion partner range before reduction, for frontend IGV context (default: 250; use 0 for exact coordinates)
 #' @return data.table or NULL
 #' @export
 create_filtered_events <- function(
@@ -2537,7 +2614,8 @@ create_filtered_events <- function(
     out_file,
     return_table = FALSE,
     cohort_type = "paired",
-    additional_columns = NULL
+    additional_columns = NULL,
+    fusion_coord_padding = 250
     ) {
   ot <- readRDS(oncotable)
 
@@ -2781,7 +2859,16 @@ create_filtered_events <- function(
       ## gOS frontend expects that the genome location is unique..
       ## This may be violated by fusions that use the same breakpoint
       ## But may annotate a different event due to transcript ambiguity.
-      padded_coords = GenomicRanges::reduce(gUtils::parse.grl(res.fus$fusion_gene_coords) + 250, ignore.strand = TRUE) %>% gUtils::grl.string()
+      coords = res.fus$fusion_gene_coords
+      ix_present = ( function(x) { which(! ( is.na(x) | !nzchar(x) )) } )(coords)
+      grl_coords = gUtils::parse.grl(coords[ix_present])
+      if (!is.numeric(fusion_coord_padding) || length(fusion_coord_padding) != 1 ||
+          is.na(fusion_coord_padding) || fusion_coord_padding < 0) {
+        stop("fusion_coord_padding must be a single non-negative number")
+      }
+      grl_coords_red = GenomicRanges::reduce(grl_coords + fusion_coord_padding, ignore.strand = TRUE)
+      padded_coords = gUtils::grl.string(grl_coords_red)
+      ## padded_coords = GenomicRanges::reduce(gUtils::parse.grl(res.fus$fusion_gene_coords) + 250, ignore.strand = TRUE) %>% gUtils::grl.string()
       coord_tbl = data.table::data.table(fusion_gene_coords = padded_coords)[, .(listid = .I, .GRP, iix = seq_len(.N)), by = fusion_gene_coords][order(rank(listid))]
       
       ## coord_tbl = data.table::data.table(fusion_gene_coords = res.fus$fusion_gene_coords)[, .(listid = .I, .GRP, iix = seq_len(.N)), by = fusion_gene_coords][order(rank(listid))]
@@ -2806,8 +2893,11 @@ create_filtered_events <- function(
         seqnames,
         ":",
         start_padded, "-", end_padded, sep = ""
-      ), by = listid][]
-      res.fus$fusion_gene_coords = dlfus[, paste(padded_fus_gene_coords, collapse = ","), by = listid]$V1
+        ), by = listid][]
+      var_gene_coords = character(NROW(res.fus))
+      var_gene_coords[ix_present] = dlfus[, paste(padded_fus_gene_coords, collapse = ","), by = listid]$V1
+      ## res.fus$fusion_gene_coords = dlfus[, paste(padded_fus_gene_coords, collapse = ","), by = listid]$V1
+      res.fus$fusion_gene_coords = var_gene_coords
       dlfus[, padded_genome_location_coords := paste(
         seqnames,
         ":",
@@ -3013,6 +3103,7 @@ create_filtered_events <- function(
 #' @param cohort Cohort object containing sample information
 #' @param output_data_dir Base directory for output files
 #' @param cores Number of cores for parallel processing (default: 1)
+#' @param fusion_coord_padding bp padding added to each side of each fusion partner range before reduction (default: 250; use 0 for exact coordinates)
 #' @return None
 #' @export
 lift_filtered_events <- function(
@@ -3024,7 +3115,9 @@ lift_filtered_events <- function(
   show_all_tags = FALSE,
   show_all_small_muts_tags = FALSE,
   show_all_cna_tags = FALSE,
-  show_all_svs_tags = FALSE
+  show_all_svs_tags = FALSE,
+  verbose = FALSE,
+  fusion_coord_padding = 250
 ) {
   if (!inherits(cohort, "Cohort")) {
       stop("Input must be a Cohort object")
@@ -3059,7 +3152,7 @@ lift_filtered_events <- function(
   # Process each sample in parallel
   futile.logger::flog.threshold("ERROR")
   iterate_fun = function(i) {
-    main = function() {
+      main = function() {
       row <- cohort$inputs[i,]
       pair_dir <- file.path(output_data_dir, row$pair)
       
@@ -3072,7 +3165,14 @@ lift_filtered_events <- function(
 
       out = NULL
       string_summary = ""
-
+      if (!all(file.exists(row[["oncotable"]]))) {
+        return(
+          list(
+            pair = row$pair,
+	    strin_summary = ""
+	  )
+        )
+      }
       out <- create_filtered_events(
         pair = row$pair,
         oncotable = row$oncotable,
@@ -3080,7 +3180,8 @@ lift_filtered_events <- function(
         out_file = out_file,
         return_table = return_table,
         cohort_type = cohort_type,
-        additional_columns = additional_columns
+        additional_columns = additional_columns,
+        fusion_coord_padding = fusion_coord_padding
       )
       if (identical(cohort_type, "heme")) {
         create_heme_highlights(
@@ -3108,7 +3209,12 @@ lift_filtered_events <- function(
       )
     }
     tryCatchLog({
-      main()
+      if (verbose) {
+        out = main()
+      } else {
+        Skilift::shutup(suppressMessages({out = main()}))
+      }
+      return(out)
     }, error = function(e) {
       print(sprintf("Error processing %s: %s", row$pair, e$message))
       NULL
@@ -3167,7 +3273,8 @@ merge_oncokb_multiplicity <- function(
   multiplicity, 
   overwrite = FALSE,
   cols.keep = c(
-    "annotation", "ref", "alt", "ref_denoised", "alt_denoised", "normal.ref", "normal.alt", "variant.c", "variant.p",
+    "annotation", "ref", "alt", "ref_denoised", "alt_denoised", "normal.ref", "normal.alt",
+    # "variant.c", "variant.p",
     "variant.g", "major.count", "minor.count", "major_snv_copies", "minor_snv_copies",
     "total_snv_copies", "total_copies", "VAF", "cn", "altered_copies"
   ),
@@ -3270,6 +3377,9 @@ merge_oncokb_multiplicity <- function(
   }
   
   gr_multiplicity$vkey = with(as.data.frame(gr_multiplicity), paste(seqnames, start, REF, ALT))
+  if (anyDuplicated(gr_multiplicity$vkey)) {
+    gr_multiplicity = gr_multiplicity[!duplicated(gr_multiplicity$vkey)]
+  }
   mc_oncokb = S4Vectors::mcols(gr_oncokb)
   if (is.null(mc_oncokb$vcf_ref) || is.null(mc_oncokb$vcf_alt)) {
     lst = Skilift:::maf_reconstruct_refalt(gr_oncokb)
@@ -3294,6 +3404,7 @@ merge_oncokb_multiplicity <- function(
   all_mg = merge(uvkey_oncokb, uvkey_mult, by = "vkey", all = TRUE)
   all_mg$count_x = S4Vectors::elementNROWS(all_mg$uvkey_oncokb)
   all_mg$count_y = S4Vectors::elementNROWS(all_mg$uvkey_mult)
+  all_mg = all_mg[count_x > 0 & count_y > 0]
   all_mg_matched = all_mg[ ! (count_x != 1 | count_y != 1) ]
   all_mg_overmatched = all_mg[  (count_x > 1 | count_y > 1) ]
   all_mg_overmatched = all_mg_overmatched[, {

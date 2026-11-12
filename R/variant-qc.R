@@ -212,7 +212,7 @@ lift_variant_qc <- function(cohort, output_data_dir, cores = 1) {
     }
     
     # Process each sample in parallel
-    mclapply(seq_len(nrow(cohort$inputs)), function(i) {
+    iterate_fun = function(i) {
         row <- cohort$inputs[i,]
         pair_dir <- file.path(output_data_dir, row$pair)
         
@@ -237,7 +237,8 @@ lift_variant_qc <- function(cohort, output_data_dir, cores = 1) {
         }, error = function(e) {
             print(sprintf("Error processing %s: %s", row$pair, e$message))
         })
-    }, mc.cores = cores, mc.preschedule = TRUE)
+    }
+    mclapply(seq_len(nrow(cohort$inputs)), iterate_fun, mc.cores = cores, mc.preschedule = TRUE)
     
     invisible(NULL)
 }

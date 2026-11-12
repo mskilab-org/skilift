@@ -1,28 +1,58 @@
 #' @name lift_bam
 #' @title lift_bam
 #' @description
-#' Lift bam file to output data directory.
-#' Currently hardlinking.
+#' Lift BAM files and indexes to the gOS output data directory. Source symlinks
+#' (including relative links and chains) are resolved to their original files.
+#' Hardlinks are used by default; symbolic links and copies are optional.
 #'
 #' @param cohort Cohort object containing sample information
 #' @param output_data_dir Base directory for output files
 #' @param cores Number of cores for parallel processing (default: 1)
+#' @param overwrite Replace existing destination files or symlinks (default: FALSE).
+#'   Replacement removes the destination link, not the file it points to.
+#' @param copy Copy original file contents instead of linking (default: FALSE).
+#'   Cannot be combined with \code{symlink = TRUE}.
+#' @param symlink Create absolute symbolic links directly to the original BAM
+#'   and index files instead of hardlinks (default: FALSE).
+#' @details
+#' Outputs are \code{<output_data_dir>/<pair>/tumor.bam}, \code{normal.bam},
+#' and their \code{.bam.bai} indexes. Index lookup prefers \code{.bam.bai},
+#' then \code{.bai}, beside the supplied BAM path; if neither exists, it checks
+#' beside the resolved BAM. Each index is resolved independently.
+#'
+#' Hardlinks require the original and destination to be on the same filesystem
+#' and survive removal of the original path. Symbolic links can cross filesystems
+#' but require the original paths to remain available to gOS. Neither link mode
+#' copies BAM contents. Use \code{overwrite = TRUE} to replace previously broken
+#' destination links. Filesystem operations use GNU \code{ln} and \code{cp}.
+#' @examples
+#' \dontrun{
+#' lift_bam(cohort, output_data_dir, overwrite = TRUE) # Hardlink original files
+#' lift_bam(cohort, output_data_dir, symlink = TRUE, overwrite = TRUE)
+#' }
 #' @return None
 #' @export
-lift_bam <- function(cohort, output_data_dir, cores = 1, overwrite = FALSE, copy = FALSE) {
+lift_bam <- function(cohort, output_data_dir, cores = 1, overwrite = FALSE, copy = FALSE, symlink = FALSE) {
     if (!inherits(cohort, "Cohort")) {
         stop("Input must be a Cohort object")
     }
 
-    transfer_method = "ln -n"
-    # force_flag = if (overwrite) "f" else ""
-    do_ln_and_add_f_flag = !all(copy) && all(overwrite)
-    do_copy = all(copy)
-    if (do_ln_and_add_f_flag) {
-        transfer_method = paste(transfer_method, "-f")
+    if (all(copy) && all(symlink)) {
+        stop("Choose either copy = TRUE or symlink = TRUE, not both")
     }
-    if (all(copy)) {
-        transfer_method = "cp"
+
+    transfer_command = if (all(copy)) "cp" else "ln"
+    transfer_args = if (all(copy)) {
+        c("-L", "-T", if (all(overwrite)) "--remove-destination" else "--no-clobber")
+    } else {
+        c("-n", "-T", if (all(symlink)) "-s" else "-L", if (all(overwrite)) "-f")
+    }
+
+    transfer_file = function(source, destination) {
+        status = system2(transfer_command, c(transfer_args, "--", shQuote(source), shQuote(destination)))
+        if (status != 0L) {
+            stop(sprintf("Failed to transfer %s to %s (exit status %s)", source, destination, status))
+        }
     }
 
     
@@ -43,24 +73,6 @@ lift_bam <- function(cohort, output_data_dir, cores = 1, overwrite = FALSE, copy
         message("No tumor_bam or normal_bam columns present in cohort inputs")
         return(NULL)
     }
-    if (!is.null(lift_inputs$tumor_bam)) {
-      bambai_path = paste(lift_inputs$tumor_bam, ".bai", sep = "")
-      bai_path = paste(tools::file_path_sans_ext(lift_inputs$tumor_bam), ".bai", sep = "")
-      lift_inputs$tumor_bam_bai = dplyr::case_when(
-                                           file.exists(bambai_path) ~ bambai_path,
-                                           file.exists(bai_path) ~ bai_path,
-                                           TRUE ~ NA_character_
-                                         )
-    }
-    if (!is.null(lift_inputs$normal_bam)) {
-      bambai_path = paste(lift_inputs$normal_bam, ".bai", sep = "")
-      bai_path = paste(tools::file_path_sans_ext(lift_inputs$normal_bam), ".bai", sep = "")
-      lift_inputs$normal_bam_bai = dplyr::case_when(
-                                           file.exists(bambai_path) ~ bambai_path,
-                                           file.exists(bai_path) ~ bai_path,
-                                           TRUE ~ NA_character_
-                                         )
-    }
 
     # Process each sample in parallel
     
@@ -72,49 +84,29 @@ lift_bam <- function(cohort, output_data_dir, cores = 1, overwrite = FALSE, copy
             dir.create(pair_dir, recursive = TRUE)
         }
         
-        tumor_bam_file <- file.path(pair_dir, "tumor.bam")
-        tumor_bai_file <- file.path(pair_dir, "tumor.bam.bai")
-
-		is_tumor_bam_out_exists = file.exists(tumor_bam_file)
-		is_tumor_bai_out_exists = file.exists(tumor_bai_file)
-
-        normal_bam_file <- file.path(pair_dir, "normal.bam")
-        normal_bai_file <- file.path(pair_dir, "normal.bam.bai")
-
-		is_normal_bam_out_exists = file.exists(normal_bam_file)
-		is_normal_bai_out_exists = file.exists(normal_bai_file)
-        
         futile.logger::flog.threshold("ERROR")
         tryCatchLog({
-          exit_tbam = 0
-          exit_tbai = 0
-          exit_nbam = 0
-          exit_nbai = 0
+            for (sample_type in c("tumor", "normal")) {
+                bam_path = row[[paste0(sample_type, "_bam")]]
+                if (is.null(bam_path) || anyNA(bam_path)) next
 
-		  is_input_tumor_bam_present = !is.null(row$tumor_bam) && ! any(is.na(row$tumor_bam))
-		  is_input_normal_bam_present = !is.null(row$normal_bam) && ! any(is.na(row$normal_bam))
+                # Resolve relative symlinks and chains before linking into the output.
+                bam_source = normalizePath(bam_path, mustWork = TRUE)
+                index_candidates = c(
+                    paste0(bam_path, ".bai"),
+                    paste0(tools::file_path_sans_ext(bam_path), ".bai"),
+                    paste0(bam_source, ".bai"),
+                    paste0(tools::file_path_sans_ext(bam_source), ".bai")
+                )
+                bai_path = index_candidates[file.exists(index_candidates)][1L]
+                if (is.na(bai_path)) {
+                    stop(sprintf("No BAM index found for %s", bam_path))
+                }
+                bai_source = normalizePath(bai_path, mustWork = TRUE)
 
-          if (is_input_tumor_bam_present) {
-            cmd_bam = glue::glue('{transfer_method} {row$tumor_bam} {tumor_bam_file}')
-            cmd_bai = glue::glue('{transfer_method} {row$tumor_bam_bai} {tumor_bai_file}')
-            exit_tbam = system(cmd_bam)
-            exit_tbai = system(cmd_bai)
-          }
-        
-          if (is_input_normal_bam_present) {
-            cmd_bam = glue::glue('{transfer_method} {row$normal_bam} {normal_bam_file}')
-            cmd_bai = glue::glue('{transfer_method} {row$normal_bam_bai} {normal_bai_file}')
-            exit_nbam = system(cmd_bam)
-            exit_nbai = system(cmd_bai)
-          }
-        #   stopifnot(
-		# 	exit_tbam == 0 
-		# 	&& exit_tbai == 0 
-		# 	&& exit_nbam == 0
-		# 	&& exit_nbai == 0
-		# )
-
- 
+                transfer_file(bam_source, file.path(pair_dir, paste0(sample_type, ".bam")))
+                transfer_file(bai_source, file.path(pair_dir, paste0(sample_type, ".bam.bai")))
+            }
         }, error = function(e) {
             print(sprintf("Error processing %s: %s", row$pair, e$message))
             NULL

@@ -10,6 +10,7 @@ lift_mvp(
   oncotable_dir,
   cores,
   genome_length = c(1:22, "X", "Y"),
+  symlink = FALSE,
   ...
 )
 }
@@ -22,7 +23,11 @@ lift_mvp(
 
 \item{cores}{Number of cores for parallel processing (default: 1)}
 
-\item{...}{Additional arguments}
+\item{symlink}{Create absolute symbolic links directly to the original BAM
+and index files instead of hardlinks (default: FALSE).}
+
+\item{...}{Additional arguments. Use \code{symlink = TRUE} to create absolute
+BAM/index symlinks to the original files instead of the default hardlinks.}
 }
 \value{
 Modified cohort object if oncotable is created, otherwise NULL

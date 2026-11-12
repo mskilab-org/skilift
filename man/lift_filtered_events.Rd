@@ -13,7 +13,8 @@ lift_filtered_events(
   show_all_tags = FALSE,
   show_all_small_muts_tags = FALSE,
   show_all_cna_tags = FALSE,
-  show_all_svs_tags = FALSE
+  show_all_svs_tags = FALSE,
+  verbose = FALSE
 )
 }
 \arguments{

@@ -126,7 +126,8 @@ has_required_columns <- function(cohort, columns, any = FALSE, verbose = TRUE) {
 #' @param cohort Cohort object containing sample information
 #' @param output_data_dir Base directory for output files
 #' @param cores Number of cores for parallel processing (default: 1)
-#' @param ... Additional arguments
+#' @param ... Additional arguments. Use \code{symlink = TRUE} to create absolute
+#'   BAM/index symlinks to the original files instead of the default hardlinks.
 #'
 #' @return None
 #' @export
@@ -218,6 +219,7 @@ lift_all <- function(
 #'
 #' @inheritParams lift_all
 #' @param oncotable_dir Directory for oncotable outputs
+#' @inheritParams lift_bam
 #'
 #' @return Modified cohort object if oncotable is created, otherwise NULL
 lift_mvp <- function(
@@ -226,6 +228,7 @@ lift_mvp <- function(
   oncotable_dir,
   cores,
   genome_length = c(1:22, "X", "Y"),
+  symlink = FALSE,
   ...
 ) {
   list2env(list(...), envir = environment())
@@ -360,8 +363,8 @@ lift_mvp <- function(
   if (has_required_columns(cohort, Skilift:::required_columns$metadata, any = TRUE)) {
     Skilift::skimessage("Uploading metadata (tumor type, coverage, other QC, HRD score, MSI score, etc) for available fields via Skilift::lift_metadata()")
     Skilift::shutup({
-      lift_metadata(
-        cohort = cohort,
+      cohort_meta = lift_metadata(
+        cohort = Skilift::copy(cohort),
         output_data_dir = output_data_dir,
         cores = cores,
         genome_length = genome_length
@@ -388,12 +391,13 @@ lift_mvp <- function(
 
   if (has_required_columns(cohort, Skilift:::required_columns$bam, any = TRUE)) {
     
-    Skilift::skimessage("Hard linking bam to data directory via Skilift::lift_bam()")
+    Skilift::skimessage("Linking BAMs to data directory via Skilift::lift_bam()")
     Skilift::shutup({
       lift_bam(
         cohort = cohort,
         output_data_dir = output_data_dir,
-        cores = cores
+        cores = cores,
+        symlink = symlink
       )
     })
   }
@@ -424,7 +428,7 @@ lift_mvp <- function(
   if (has_required_columns(cohort, required_columns$twod_purity_ploidy)) {
     Skilift::skimessage("Uploading 2D purity ploidy plot via Skilift::lift_2d_purity_ploidy_plot()")
     Skilift::shutup({
-      lift_2d_purity_ploidy_plot(
+      sinkvar = lift_2d_purity_ploidy_plot(
         cohort = cohort,
         output_data_dir = output_data_dir,
         cores = cores
@@ -445,13 +449,17 @@ lift_mvp <- function(
 
   if (has_required_columns(cohort, required_columns$allelic_pp_fit)) {
     Skilift::skimessage("Uploading Zi-Ning (Allelic purity ploidy fit) plot via Skilift::lift_allelic_pp_fit()")
-    Skilift::shutup({
-      lift_allelic_pp_fit(
-        cohort = cohort,
-        output_data_dir = output_data_dir,
-        cores = cores
-      )
-    })
+    submain = function() {
+      Skilift::shutup({
+        lift_allelic_pp_fit(
+          cohort = cohort,
+          output_data_dir = output_data_dir,
+          cores = cores
+        )
+      })
+
+    }
+    capture.output({sinkvar = submain()}, type = "output")
   }
 
   return(cohort)
