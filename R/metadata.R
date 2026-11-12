@@ -1659,6 +1659,9 @@ add_msisensor_score <- function(metadata, msisensorpro) {
 #' @param genome The genome reference used.
 #' @param seqnames_loh Sequence names for loss of heterozygosity.
 #' @param seqnames_genome_width_or_genome_length Sequence names and genome width in list or genome length as a numeric
+#' @param qc_merged Optional path to sample-keyed merged QC JSON. When omitted,
+#'   legacy metadata behavior is unchanged.
+#' @param qc_sample_key Record key in qc_merged; defaults to pair.
 #' @return A data.table containing the metadata for a single sample pair.
 #' @export
 create_metadata <- function(
@@ -1704,7 +1707,9 @@ create_metadata <- function(
     conpair_concordance = NULL,
     cohort_type = NULL,
     qc_flags_config = NULL,
-    added_field_values = NULL
+    added_field_values = NULL,
+    qc_merged = NULL,
+    qc_sample_key = pair
 ) {
     # Initialize metadata with all possible columns
     metadata <- initialize_metadata_columns(pair)
@@ -1730,6 +1735,11 @@ create_metadata <- function(
         tumor_wgs_metrics = tumor_wgs_metrics,
         normal_wgs_metrics = normal_wgs_metrics
     )
+    if (!is.null(qc_merged) && length(qc_merged) == 1L && !is.na(qc_merged) && nzchar(qc_merged)) {
+        metadata <- add_coverage_metrics_from_qc_file(
+            metadata, qc_merged = qc_merged, sample_key = qc_sample_key
+        )
+    }
     metadata <- add_variant_counts(metadata, somatic_snvs, genome)
     
     # New SV-related function calls
@@ -1800,7 +1810,14 @@ create_metadata <- function(
         metadata$visible <- FALSE
     }
 
-    metadata = process_qc_flag(metadata, qc_flags_config)
+    if (!is.null(qc_merged) && length(qc_merged) == 1L && !is.na(qc_merged) && nzchar(qc_merged)) {
+        # Evaluate the unchanged flag rules on a list so a single flag cannot
+        # be flattened by data.table's single-column replacement semantics.
+        flagged <- process_qc_flag(as.list(metadata), qc_flags_config)
+        data.table::set(metadata, j = "qcMetrics", value = list(flagged$qcMetrics))
+    } else {
+        metadata = process_qc_flag(metadata, qc_flags_config)
+    }
 
     metadata$summary = summary
 
@@ -1821,6 +1838,9 @@ create_metadata <- function(
 #' Create metadata files for all samples in a cohort
 #'
 #' @param cohort Cohort object containing sample information
+#'   Optional qc_merged and qc_sample_key columns select premerged QC. When an
+#'   explicit sample key is absent, ir_analysis_id supplies the IR DNA id, falling
+#'   back to pair for other cohorts. QC is ingested before QC flags are evaluated.
 #' @param output_data_dir Base directory for output files
 #' @param cores Number of cores for parallel processing (default: 1)
 #' @param genome_length Genome length for the samples (for targeted panels or WES data)
@@ -1972,7 +1992,9 @@ lift_metadata <- function(
                     summary = row[["string_summary"]],
                     cohort_type = cohort_type,
                     qc_flags_config = row[["qc_flags"]][[1]],
-                    added_field_values = added_fields_lst
+                    added_field_values = added_fields_lst,
+                    qc_merged = row[["qc_merged"]],
+                    qc_sample_key = qc_sample_key_from_row(row)
                 )
 
                 if (is.null(metadata)) {

@@ -15,7 +15,10 @@ lift_metadata(
 )
 }
 \arguments{
-\item{cohort}{Cohort object containing sample information}
+\item{cohort}{Cohort object containing sample information
+Optional qc_merged and qc_sample_key columns select premerged QC. When an
+explicit sample key is absent, ir_analysis_id supplies the IR DNA id, falling
+back to pair for other cohorts. QC is ingested before QC flags are evaluated.}
 
 \item{output_data_dir}{Base directory for output files}
 
