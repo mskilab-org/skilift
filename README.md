@@ -155,22 +155,6 @@ the cohort for that plot type. The lifter methods can be run in parallel, and
 the number of cores can be specified by setting the `cores` parameter. By
 default, the lifter methods will use 1 core.
 
-## OncoKB frameshift annotations
-
-`collect_oncokb` classifies frameshift consequences as `trunc` for both
-legacy protein annotations ending in `fs` and full HGVS forms ending in
-`fsTer27`, `fs*27`, `fsTer?`, or `fs*?`. Predicted forms such as
-`p.(Arg97ProfsTer23)` are also supported. Immediate termination at the changed
-residue (`p.Ser1586Ter` or `p.S1586*`) is retained when the consequence is
-frameshift, even without an explicit `fs` suffix. These variants survive
-the oncotable filter for unclassified rows.
-
-Protein/coding annotations, transcript IDs, OncoKB tiers, and all other
-consequence classification rules are unchanged. Blank, missing, or unknown
-protein annotations do not establish a frameshift type by themselves.
-The new forms are a fallback after the existing rules: compound consequences
-already classified as splice, missense, in-frame, or UTR retain that type.
-
 # Usage with PGV
 The Skilift class manages a database of patient metadata and genomic plot data. It provides an interface to load, update, query, and manipulate the datafiles.json of PGV programmatically. This object is only necessary if you want to push data to PGV.
 
