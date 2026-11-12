@@ -1671,6 +1671,12 @@ collect_oncokb <- function(oncokb_maf, multiplicity = NA_character_, verbose = T
       grepl("inframe_(insertion|deletion)", oncokb$Consequence) ~ "inframe",
       grepl("upstream", oncokb$Consequence) ~ "upstream",
       grepl("(5|3)_prime_UTR_variant", oncokb$Consequence) ~ "UTR",
+      # Full HGVS frameshifts and immediate termination at the changed residue.
+      # Fallback only: preserve existing classifications of compound consequences.
+      grepl("frameshift", oncokb$Consequence) & (
+        grepl("fs(Ter|\\*)([0-9]+|\\?)\\)?$", oncokb$HGVSp) |
+        grepl("^p\\.\\(?[A-Za-z]+[0-9]+(Ter|\\*)\\)?$", oncokb$HGVSp)
+      ) ~ "trunc",
       TRUE ~ NA_character_
     )
 
